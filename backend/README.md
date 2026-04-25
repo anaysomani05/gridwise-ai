@@ -1,50 +1,74 @@
-# Agent README
+# Backend README
 
-This directory owns the **AI experience layer** for GridWise. The agent layer should not replace the optimizer; it should explain, remember, and optionally speak the optimizer’s decisions.[cite:93][cite:94][cite:98][cite:102]
+This directory owns the **core scheduling engine** for GridWise. The backend is the real product: it fetches grid-emissions data, models a workload, compares a baseline schedule to an optimized schedule, and returns the metrics the frontend and AI layer display.[web:65][web:74]
 
 ## What this part does
 
-The agent layer takes structured optimization output and turns it into a user-friendly experience by:
+The backend should answer one question: given a flexible AI/data-center job with a duration, power draw, start time, and deadline, what is the cleanest feasible time window to run it in? Electricity Maps and WattTime both expose real-time, historical, and forecasted grid-emissions signals that make this kind of load-shifting optimization possible.[web:55][web:65][web:74][web:86] It should also compute the baseline “run as soon as possible” schedule and report the difference in emissions between the baseline and optimized options, because carbon-aware scheduling is useful only if the impact is quantified.[web:117][web:149]
 
-- generating natural-language explanations with Gemma 4,[cite:93][cite:94][cite:97]
-- storing preferences and prior runs with Backboard,[cite:102][cite:177]
-- optionally generating spoken explanations with ElevenLabs.[cite:98][cite:101]
+## Key concepts
 
-The core scheduling math should remain in the backend. This layer is about trust, memory, and usability.
+- **Carbon intensity** means grams of CO2 per kWh of electricity at a particular time and region, which can vary significantly across hours because the grid mix changes.[web:68][web:85][web:92]
+- **Marginal emissions** estimate the emissions impact of one extra unit of electricity demand, which is especially relevant for incremental loads like compute jobs.[web:74][web:117]
+- **Load shifting** means moving the same job to a different time, not reducing the amount of compute, and modern grid-data APIs explicitly support using forecast signals to find lower-carbon windows.[web:55][web:66][web:74]
 
 ## Recommended stack
 
-- Node.js or Python, whichever the owner prefers
-- Google Gemini API with Gemma 4 model access.[cite:93][cite:94]
-- Backboard for persistent memory.[cite:102][cite:177]
-- ElevenLabs Text-to-Speech API for optional audio.[cite:98][cite:101]
+- Python
+- FastAPI
+- Pydantic
+- httpx or requests
+- Optional: pandas for convenience
+
+FastAPI is a strong fit for parallel frontend/backend work because schema-first and contract-first API development works well with OpenAPI-style flows and reduces integration friction.[web:170][web:171][web:191]
 
 ## Directory structure
 
 ```text
-agent/
+backend/
   README.md
-  prompts/
-    explain_schedule.md
+  main.py
+  schemas.py
+  config.py
+  providers/
+    electricity_maps.py
+    watttime.py
   services/
-    gemma_service.py
-    memory_service.py
-    elevenlabs_service.py
-  routes/
-    explain.py
-    history.py
+    scheduler.py
+    metrics.py
+    demo_data.py
 ```
 
-## Key principle
+## Core endpoint contract
 
-The AI layer should consume **structured facts** from the backend and explain them. It should not invent scheduling logic, change the optimized window, or recompute emissions.[cite:93][cite:94]
+### POST /optimize
 
-## Inputs from backend
-
-The agent layer should expect a payload like:
+Request body example:
 
 ```json
 {
+  "region": "US-CAL-CISO",
+  "job_name": "nightly-training",
+  "duration_hours": 4,
+  "power_kw": 12,
+  "start_after": "2026-04-25T18:00:00Z",
+  "deadline": "2026-04-26T08:00:00Z",
+  "optimization_mode": "carbon"
+}
+```
+
+Response body example:
+
+```json
+{
+  "request": {
+    "region": "US-CAL-CISO",
+    "duration_hours": 4,
+    "power_kw": 12,
+    "deadline": "2026-04-26T08:00:00Z"
+  },
+  "provider": "electricity_maps",
+  "signal_type": "carbon_intensity",
   "baseline": {
     "start": "2026-04-25T18:00:00Z",
     "end": "2026-04-25T22:00:00Z",
@@ -60,170 +84,169 @@ The agent layer should expect a payload like:
     "percent_reduction": 26.35,
     "deadline_met": true
   },
+  "timeseries": [
+    {"timestamp": "2026-04-25T18:00:00Z", "signal": 410},
+    {"timestamp": "2026-04-25T19:00:00Z", "signal": 430}
+  ],
   "reasoning": {
     "baseline_avg_signal": 402,
     "optimized_avg_signal": 281,
     "dirtiest_hours_avoided": ["18:00", "19:00", "20:00"],
     "cleaner_hours_used": ["01:00", "02:00", "03:00", "04:00"]
-  },
-  "request": {
-    "region": "US-CAL-CISO",
-    "duration_hours": 4,
-    "power_kw": 12,
-    "deadline": "2026-04-26T08:00:00Z"
   }
 }
 ```
 
-## Gemma 4 integration
+The frontend and AI layer should both build against this response shape first using mock data, because contract-first development reduces merge conflicts and speeds up parallel work.[web:171][web:191]
 
-Gemma 4 is available through Google Gemini APIs and is suitable for building fast, private-feeling AI features with open models.[cite:93][cite:94][cite:96]
+## Data provider plan
 
-### What Gemma should do
+### Option 1: Electricity Maps
 
-Generate explanations like:
+Electricity Maps provides real-time, historical, and forecasted grid carbon signals and is a strong default choice for the MVP.[web:55][web:65][web:67] Its forecasted carbon-intensity endpoint uses 1-hour granularity by default and returns 25 hours of forecasts by default, and the platform also supports broader forecast-based load-optimization use cases including 72-hour forecasts.[web:65][web:86] Electricity Maps also publishes methodology notes explaining how it computes carbon intensity by combining flow-traced electricity mix with technology-specific emission factors.[web:68][web:85]
 
-- why the baseline was dirtier,
-- why the chosen window is cleaner,
-- whether the deadline is still satisfied,
-- what tradeoff was made.
+### Option 2: WattTime
 
-### What Gemma should not do
+WattTime provides marginal CO2 signals and forecasting support, which is especially strong for incremental-load scheduling use cases like compute jobs.[web:55][web:74][web:117] WattTime’s MOER signal represents the emissions rate of the generators responding to changes in local load, which makes it a very good fit for deciding when an additional AI workload should run.[web:74][web:117] WattTime has also expanded its hourly marginal emissions coverage globally and continues to improve forecast quality and regional models.[web:70][web:72]
 
-- invent new metric values
-- change the optimized schedule
-- claim savings not present in the backend payload
-- hallucinate unsupported grid facts
+### Recommended implementation order
 
-### Prompt design
+1. Implement Electricity Maps first because its forecasted carbon-intensity endpoint is straightforward and well-suited for the MVP.[web:65][web:86]
+2. Add fallback demo data so the app still works if the live API fails.
+3. Add WattTime only if the MVP is stable, especially if you want a stronger marginal-emissions story.[web:74][web:117]
 
-Prompt Gemma using structured fields only.
+## Scheduling logic
 
-Suggested prompt skeleton:
+Use a simple contiguous sliding-window optimizer.
 
-```text
-You are explaining a carbon-aware scheduling decision to a user.
-Use only the provided values.
-Be concise, specific, and factual.
-Mention the baseline window, optimized window, emissions reduction, and deadline status.
-Do not invent numbers.
-```
+### Assumptions
 
-Then pass the structured JSON payload below the instruction.
+- The job must run continuously.
+- The power draw is fixed during the run.
+- The schedule uses hourly slots.
+- The job must finish before the deadline.
 
-## Backboard integration
+### Baseline
 
-Backboard focuses on persistent AI memory and state across sessions, which fits the “compare this run to previous runs” feature well.[cite:102][cite:177][cite:180]
+Use **ASAP scheduling** as the baseline: the job starts at `start_after` and runs for the required duration. This is the most natural default because it mimics what many users or cron-based systems would do without carbon-awareness.[web:149]
 
-### What to store
+### Optimized schedule
 
-- past optimize requests
-- emissions outcomes
-- preferred regions
-- preferred optimization mode
-- last explanation text
+1. Fetch signal values from `start_after` until `deadline` using either Electricity Maps or WattTime.[web:55][web:65][web:74]
+2. Enumerate all feasible contiguous windows of length `duration_hours`.
+3. For each window, compute total emissions using the hourly signal values.
+4. Select the window with the lowest emissions.[web:117][web:149]
 
-### Useful user-facing features
+### Emissions formula
 
-- “Compared to your last run, this schedule saved 4% more CO2.”
-- “You usually prefer low-carbon mode in California.”
-- “Your previous 3 runs mostly shifted jobs away from evening peak hours.”
+If the signal is in gCO2/kWh and the job uses fixed power each hour, emissions in kilograms are:
 
-Keep memory minimal and useful.
+\[
+\text{emissions\_kg} = \sum_t \frac{\text{signal}_t \times \text{energy\_kWh}_t}{1000}
+\]
 
-## ElevenLabs integration
-
-ElevenLabs exposes text-to-speech APIs that can turn the explanation into a spoken result for the demo.[cite:98][cite:101]
-
-### Suggested UX
-
-Button: **Play explanation**
-
-Input text:
-- the final Gemma explanation
-
-Output:
-- streamed or downloadable audio clip
-
-This is a nice demo enhancement, but it is optional. Do not block the rest of the agent layer on audio.
-
-## API endpoints this layer can expose
-
-### POST /explain
-
-Input:
-- backend optimize response
-
-Output:
-
-```json
-{
-  "explanation_text": "GridWise shifted your 4-hour workload away from the evening high-emissions period and into an overnight lower-carbon window, reducing expected emissions by 26.35% while still meeting the deadline.",
-  "audio_available": true
-}
-```
-
-### POST /save-run
-
-Store current run and user preferences in Backboard.
-
-### GET /history
-
-Return prior optimization runs and summary statistics for the frontend history panel.
+This is the main measurable impact calculation for the project, and API-based carbon accounting is a recognized way to estimate electricity-related software emissions by location and time.[web:55][web:117]
 
 ## Build order
 
-### Step 1: Work from mock backend JSON
+### Step 1: Set up the app
 
-Start immediately using one sample optimize response so the AI layer can be built in parallel with backend and frontend.[cite:171][cite:179]
+- Create FastAPI app in `main.py`
+- Add `GET /health`
+- Add Pydantic schemas in `schemas.py`
+- Add environment variable loading in `config.py`
 
-### Step 2: Gemma explanation endpoint
+FastAPI is well suited to this because its schema tooling naturally supports clean REST API design and contract-driven iteration.[web:170][web:171]
 
-- connect to Gemma via Gemini API
-- build prompt template
-- return concise explanation text
+### Step 2: Implement provider client
 
-### Step 3: Backboard memory
+- Add API key support
+- Implement function to fetch 24–72 hour signal data for one region
+- Normalize result into a common internal format
 
-- store the request + result
-- retrieve previous runs
-- generate one simple comparison message
+Example internal format:
 
-### Step 4: ElevenLabs audio
+```json
+{
+  "region": "US-CAL-CISO",
+  "signal_type": "carbon_intensity",
+  "unit": "gCO2eq_per_kWh",
+  "points": [
+    {"timestamp": "2026-04-25T18:00:00Z", "value": 410}
+  ]
+}
+```
 
-- convert explanation text to speech
-- return audio URL/blob or expose a separate endpoint
+A provider-agnostic internal format makes it easy to start with Electricity Maps and later swap in or add WattTime without changing the scheduler logic.[web:55][web:65][web:74]
+
+### Step 3: Implement baseline + optimizer
+
+- Create baseline schedule generator
+- Create feasible-window generator
+- Create emissions evaluator
+- Return best window
+
+This is the core environmental optimization logic of the project: the backend uses time-varying emissions signals to pick the cleanest feasible schedule.[web:66][web:74][web:117]
+
+### Step 4: Add metrics and reasoning payload
+
+Compute:
+
+- `baseline_emissions_kg`
+- `optimized_emissions_kg`
+- `co2_saved_kg`
+- `percent_reduction`
+- `deadline_met`
+- average signal in baseline and optimized windows
+
+This structured reasoning payload helps the Gemma layer explain the result clearly without inventing numbers.[web:94][web:97]
+
+### Step 5: Add fallback demo mode
+
+External APIs can fail in demos, so include locally stored fallback data for at least 2–3 regions.[web:65][web:74] If the provider errors or times out, respond using cached data and set a flag like `"source": "fallback_demo_data"` so the app remains usable during judging.
+
+## What to test
+
+- Valid request with one feasible window
+- Valid request with multiple feasible windows
+- No feasible schedule because deadline is too soon
+- API unavailable, fallback succeeds
+- Equal-signal hours where optimized = baseline
+- Invalid duration or missing fields
+
+Also test that the API contract remains stable because contract-breaking changes slow down frontend and agent integration.[web:191]
 
 ## What not to build
 
-Do not spend time on:
+Do not spend hackathon time on:
 
-- open-ended chat interfaces
-- autonomous tool-calling agents with complex loops
-- elaborate RAG pipelines
-- multi-agent orchestration
-- trying to make the AI decide the schedule itself
+- databases
+- Kubernetes
+- job queues
+- real cloud-provider integration
+- GPU telemetry
+- multi-region workload placement
+- split or preemptible jobs
+- enterprise auth in the backend
 
-This layer is successful when it makes the optimizer easier to understand and more memorable, not when it becomes the whole app.
+The goal is a reliable optimizer, not a production cloud scheduler.[web:149][web:170]
 
-## Integration notes
+## Handoff to teammates
 
-### With backend
+### To frontend
 
-The backend should remain the single source of truth for numbers and time windows.
+Provide:
 
-### With frontend
+- endpoint URL
+- request schema
+- response schema
+- one sample response JSON
+- list of supported demo regions
 
-The frontend should simply render:
+### To AI/agent layer
 
-- `explanation_text`
-- audio playback control if present
-- previous run summaries
+Provide the `reasoning`, `baseline`, `optimized`, and `metrics` blocks so Gemma can explain decisions and Backboard can store results cleanly.[web:94][web:102]
 
 ## Success criteria
 
-This part is done when the app can:
-
-1. explain a scheduling result with Gemma,[cite:93][cite:94]
-2. remember at least one previous run with Backboard,[cite:102][cite:177]
-3. optionally speak the explanation with ElevenLabs.[cite:98][cite:101]
+This part is done when `POST /optimize` reliably returns a valid baseline schedule, a lower-emissions optimized schedule when one exists, and all required metrics for the UI and explanation layer.[web:55][web:65][web:74][web:117]
