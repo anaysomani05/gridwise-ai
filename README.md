@@ -1,7 +1,7 @@
 # GridWise AI: Carbon-Aware Compute Scheduler
 
 **Idea:**  
-An AI-powered scheduler that shifts flexible AI and data-center workloads into lower-carbon hours using real grid emissions data and optimization, cutting compute emissions without missing SLAs.[web:79][web:194]
+An AI-powered scheduler that shifts flexible AI and data-center workloads into lower-carbon hours using real grid emissions data and optimization, cutting compute emissions without missing SLAs.
 
 ## What this project is
 
