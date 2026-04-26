@@ -1,1 +1,1 @@
-# Data providers (Electricity Maps, WattTime, ...)
+# Data providers (Electricity Maps live API).

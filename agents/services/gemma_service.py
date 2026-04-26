@@ -7,9 +7,10 @@ optimizer response into a concise, factual natural-language explanation.
 Required env var:
   GEMINI_API_KEY   — your Google AI Studio / Gemini API key
 
-Optional env var:
-  GEMMA_MODEL      — model ID (default: gemma-3-27b-it)
-                     Override to e.g. "gemma-4-27b-it" when available.
+Optional env vars:
+  GEMMA_MODEL              — model ID (default: gemma-3-27b-it)
+  EXPLAIN_MAX_OUTPUT_TOKENS — cap for /explain prose (default 2048). The old
+                             default of ~420 tokens often cut mid-sentence.
 """
 
 import asyncio
@@ -25,6 +26,7 @@ from google.genai import types
 # ---------------------------------------------------------------------------
 
 _MODEL = os.getenv("GEMMA_MODEL", "gemma-3-27b-it")
+_EXPLAIN_MAX_OUT = int(os.getenv("EXPLAIN_MAX_OUTPUT_TOKENS", "2048"))
 
 _SYSTEM_INSTRUCTION = """\
 You are GridWise's scheduling explainer. The dashboard already shows the
@@ -233,7 +235,7 @@ async def generate_explanation(payload: dict) -> str:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.16,
-                max_output_tokens=420,
+                max_output_tokens=max(512, min(_EXPLAIN_MAX_OUT, 8192)),
                 candidate_count=1,
             ),
         )

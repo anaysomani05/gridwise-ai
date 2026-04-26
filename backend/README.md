@@ -9,14 +9,16 @@ backend/
   main.py              # FastAPI app, routes
   schemas.py           # Request/response models
   config.py            # Settings from env
-  providers/           # Electricity Maps, WattTime clients
+  providers/           # Electricity Maps live client
   services/            # scheduler, regions, demo fallback, etc.
 ```
 
 ## Main routes
 
 - `POST /optimize` — body: `region`, `duration_hours`, `power_kw` (or `instance_type`), `start_after`, `deadline` (ISO 8601 UTC), optional `job_name`.
-- `GET /regions` — zones the optimizer supports (for the dashboard dropdown).
+- `POST /chat` — **proxy** to the agent layer’s `POST /chat` (scheduling assistant). Same JSON body/response as the agent service so the UI can use one base URL for both optimize and chat. Target URL defaults to `http://127.0.0.1:8001`; override with `AGENT_SERVICE_URL` in `.env` (see `config.py`).
+- `POST /equivalencies` — **proxy** to the agent’s `POST /equivalencies` (body = `OptimizeResponse` → `{ equivalencies: […×3] }` for the dashboard “fun equivalencies” card).
+- `GET /regions` — zones for the dashboard: a hand-picked catalog plus, when `ELECTRICITY_MAPS_API_TOKEN` is set, any extra zones returned by Electricity Maps `GET /v3/zones` (merged and cached ~1h).
 - `GET /health` — liveness.
 
 See `/docs` on a running server for full schemas (`GET /instance-types`, `POST /compare-regions`, …).

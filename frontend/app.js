@@ -8,10 +8,14 @@
 //                                     -> { explanation_text, audio_available }
 //   POST {agentUrl}/explain/audio     body = OptimizeResponse
 //                                     -> { explanation_text, audio_b64, mime_type }
+//   POST {backendUrl}/chat            -> proxy to agent (preferred when backend set)
+//   POST {agentUrl}/chat              -> same contract if only agent URL configured
+//   POST {backendUrl}/equivalencies   body = OptimizeResponse -> { equivalencies: [s,s,s] } (proxy)
+//   POST {agentUrl}/equivalencies     same; if no URL, UI uses local ballpark lines from kg saved
 //
 // Defaults: if no settings are configured we point at localhost:8000 / :8001
 // so the demo "just works" when both servers are running locally. Setting either
-// URL to an empty string in the Connect APIs drawer falls back to mock data.
+// URL to an empty string in the Connect data drawer falls back to mock data.
 
 const STORE_KEY = "gridwise.settings.v1";
 
@@ -69,6 +73,10 @@ let CHART = null;
 // Holds the most recent optimize response. Null until the user clicks Optimize;
 // renderOptimize() sets it, and onExplain() reads it to feed the agent layer.
 let CURRENT_OPTIMIZE = null;
+
+const LAST_RUN_KEY = "gridwise.lastRun.v1";
+/** @type {{ role: string, content: string }[]} */
+let CHAT_HISTORY = [];
 
 // ---- helpers
 const $ = (id) => document.getElementById(id);
@@ -160,6 +168,467 @@ function updateModeBadge() {
   const el = $("modeBadge");
   if (!el) return;
   el.textContent = live ? "Live" : "Demo";
+}
+
+// ---- Talk to agent: chat + last-run memory
+function loadLastRun() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_RUN_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+/** Slim POST /optimize payload for chat + what-if math (caps timeseries size). */
+function compactOptimizeForChat(opt) {
+  if (!opt || typeof opt !== "object") return null;
+  const ts = Array.isArray(opt.timeseries) ? opt.timeseries : [];
+  const maxPts = 168;
+  let slimTs = ts;
+  if (ts.length > maxPts) {
+    const step = Math.ceil(ts.length / maxPts);
+    slimTs = ts.filter((_, i) => i % step === 0);
+  }
+  return {
+    request: opt.request,
+    provider: opt.provider,
+    signal_type: opt.signal_type,
+    baseline: opt.baseline,
+    optimized: opt.optimized,
+    metrics: opt.metrics,
+    reasoning: opt.reasoning,
+    timeseries: slimTs,
+    data_source: opt.data_source,
+    optimization_note: opt.optimization_note,
+    data_quality: opt.data_quality,
+  };
+}
+
+/** Last optimization digest: in-memory run wins; else restore from localStorage after refresh. */
+function chatLastOptimizePayload() {
+  if (CURRENT_OPTIMIZE) return compactOptimizeForChat(CURRENT_OPTIMIZE);
+  try {
+    const lr = JSON.parse(localStorage.getItem(LAST_RUN_KEY) || "null");
+    return lr?.optimize_digest || null;
+  } catch {
+    return null;
+  }
+}
+
+function persistLastRun(opt) {
+  try {
+    const payload = buildPayload();
+    localStorage.setItem(
+      LAST_RUN_KEY,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        request: payload,
+        region: payload.region,
+        percent_reduction: opt.metrics?.percent_reduction,
+        co2_saved_kg: opt.metrics?.co2_saved_kg,
+        mode: "carbon",
+        optimize_digest: compactOptimizeForChat(opt),
+      }),
+    );
+  } catch (e) {
+    console.warn("persistLastRun", e);
+  }
+}
+
+function utcIsoToDatetimeLocal(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day}T${hh}:${mm}`;
+}
+
+function shiftDatetimeLocal(inputId, hours) {
+  const el = $(inputId);
+  if (!el || !el.value) return;
+  const iso = localToUtcIso(el.value);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return;
+  d.setTime(d.getTime() + hours * 3600000);
+  el.value = utcIsoToDatetimeLocal(d.toISOString());
+}
+
+function applyTightDeadlineNearNow() {
+  const startEl = $("startAfter");
+  const durEl = $("durationHours");
+  const deadEl = $("deadline");
+  if (!startEl || !durEl || !deadEl || !startEl.value) return;
+  const startIso = localToUtcIso(startEl.value);
+  const dur = Math.max(1, Math.round(Number(durEl.value) || 1));
+  const d = new Date(startIso);
+  if (Number.isNaN(d.getTime())) return;
+  d.setUTCHours(d.getUTCHours() + dur + 2);
+  deadEl.value = utcIsoToDatetimeLocal(d.toISOString());
+}
+
+function collectFormState() {
+  const regionSel = $("region");
+  const codes = regionSel ? [...regionSel.options].map((o) => o.value).filter(Boolean) : [];
+  return {
+    region: regionSel?.value,
+    duration_hours: Math.round(Number($("durationHours")?.value) || 1),
+    job_name: $("jobName")?.value,
+    mode: "carbon",
+    instance_preset: $("instancePreset")?.value,
+    power_kw: $("powerKw")?.value,
+    start_after_local: $("startAfter")?.value,
+    deadline_local: $("deadline")?.value,
+    available_regions_sample: codes.slice(0, 48),
+  };
+}
+
+function applyChatPatch(patch) {
+  if (!patch || typeof patch !== "object") return;
+  const r = $("region");
+  if (patch.region && r) {
+    const v = String(patch.region);
+    if ([...r.options].some((o) => o.value === v)) r.value = v;
+  }
+  const ext = Number(patch.deadline_extend_hours);
+  if (Number.isFinite(ext) && ext !== 0) shiftDatetimeLocal("deadline", ext);
+  const sh = Number(patch.deadline_shorten_hours);
+  if (Number.isFinite(sh) && sh > 0) shiftDatetimeLocal("deadline", -sh);
+  const st = Number(patch.start_shift_hours);
+  if (Number.isFinite(st) && st !== 0) shiftDatetimeLocal("startAfter", st);
+  const dh = Number(patch.duration_hours);
+  if (Number.isFinite(dh) && dh > 0) $("durationHours").value = String(Math.max(1, Math.round(dh)));
+}
+
+function appendChatBubble(role, text, opts = {}) {
+  const skipHistory = !!opts.skipHistory;
+  const box = $("chatMessages");
+  if (!box) return;
+  const wrap = document.createElement("div");
+  wrap.className = role === "user" ? "flex justify-end" : "flex justify-start";
+  const bubble = document.createElement("div");
+  bubble.className =
+    role === "user"
+      ? "max-w-[92%] rounded-2xl rounded-br-md bg-ink text-white text-sm px-4 py-2.5 leading-relaxed whitespace-pre-wrap break-words"
+      : "max-w-[92%] rounded-2xl rounded-bl-md bg-white border border-black/10 text-sm px-4 py-2.5 leading-relaxed text-slate-800 shadow-sm whitespace-pre-wrap break-words";
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+  if (!skipHistory && (role === "user" || role === "assistant")) {
+    CHAT_HISTORY.push({ role, content: text });
+    while (CHAT_HISTORY.length > 14) CHAT_HISTORY.shift();
+  }
+}
+
+function buildWelcomeMessage() {
+  const lr = loadLastRun();
+  if (!lr || !lr.region) {
+    return (
+      "Hi — I'm here to chat about your job and the last optimization: trade-offs like “what if we start an hour earlier?” " +
+      "Run Optimize on the Dashboard first so I have numbers; then ask away or use a quick action. " +
+      "Open Dashboard anytime for the timeline and full form."
+    );
+  }
+  const pct = lr.percent_reduction != null ? Number(lr.percent_reduction).toFixed(1) : "—";
+  const kg = lr.co2_saved_kg != null ? Number(lr.co2_saved_kg).toFixed(1) : "—";
+  return (
+    `Welcome back. Last run was in ${lr.region}: about ${pct}% less CO₂ than baseline (${kg} kg saved). ` +
+    "Ask how moving the recommended window earlier or later would change emissions, or tell me a new goal."
+  );
+}
+
+function ensureAgentWelcome() {
+  const box = $("chatMessages");
+  if (!box || box.dataset.welcomeDone === "1") return;
+  if (box.childElementCount > 0) return;
+  appendChatBubble("assistant", buildWelcomeMessage(), { skipHistory: true });
+  box.dataset.welcomeDone = "1";
+}
+
+function heuristicChatReply(userText) {
+  const t = userText.toLowerCase();
+  const patch = {};
+  let message = "";
+  let suggest_optimize = true;
+
+  const zoneMatch = userText.match(/\b([A-Z]{2}(?:-[A-Z0-9]+)+)\b/);
+  if (zoneMatch) patch.region = zoneMatch[1];
+
+  if (/same|again|rerun|repeat/i.test(t)) {
+    message = "Re-running with your saved fields unchanged.";
+    suggest_optimize = true;
+  } else if (/maximize|max.*carbon|reduce emission|as clean|as much as possible|lowest carbon/i.test(t)) {
+    patch.deadline_extend_hours = 12;
+    message = "Deadline widened by 12 hours so the backend can search for cleaner windows (carbon-only optimization).";
+  } else if (/balance.*carbon|carbon.*cost|both|balanced|cost.?optim/i.test(t)) {
+    message =
+      "This app only optimizes for lowest grid carbon. I can still widen your deadline or shift your search window—say “more flexibility” if you want that.";
+    suggest_optimize = false;
+  } else if (/aggressive|widen|more flex|more time/i.test(t)) {
+    patch.deadline_extend_hours = 24;
+    message = "Extended the deadline by 24 hours for a wider search.";
+  } else if (/close|tight|soon|minimal delay|asap|near now/i.test(t)) {
+    applyTightDeadlineNearNow();
+    message = "Tightened the deadline to just after your job duration — less flexibility, closer to “run soon”.";
+  } else {
+    message =
+      "I'll pass that to the optimizer with your current fields. Name a region clearly if you want to switch zones (e.g. US-CAL-CISO).";
+    suggest_optimize = true;
+  }
+
+  return { assistant_message: message, patch, suggest_optimize };
+}
+
+async function callAgentChatApi(userTextForHeuristic) {
+  const s = loadSettings();
+  const last = loadLastRun();
+  const last_run = last
+    ? {
+        region: last.region,
+        percent_reduction: last.percent_reduction,
+        co2_saved_kg: last.co2_saved_kg,
+        mode: last.mode,
+        at: last.at,
+      }
+    : null;
+
+  // Prefer optimizer backend POST /chat (proxy → agent) when backendUrl is set,
+  // so the chatbot uses the same base URL as POST /optimize.
+  const useBackend = !!s.backendUrl;
+  const base = useBackend
+    ? s.backendUrl.replace(/\/$/, "")
+    : (s.agentUrl || "").replace(/\/$/, "");
+  if (!base) {
+    return heuristicChatReply(userTextForHeuristic);
+  }
+
+  const url = `${base}/chat`;
+  const messages = [...CHAT_HISTORY];
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages,
+        last_run,
+        last_optimize: chatLastOptimizePayload(),
+        form_state: collectFormState(),
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return {
+      assistant_message: data.assistant_message || "",
+      patch: data.patch || {},
+      suggest_optimize: !!data.suggest_optimize,
+    };
+  } catch (e) {
+    console.warn("chat failed", e);
+    return heuristicChatReply(userTextForHeuristic);
+  }
+}
+
+/** After the latest user line is in CHAT_HISTORY, fetch assistant reply and optional auto-optimize. */
+async function finishChatTurn(userTextForHeuristic) {
+  const typing = document.createElement("div");
+  typing.id = "chatTyping";
+  typing.className = "text-xs text-slate-500 px-1";
+  typing.textContent = "Thinking…";
+  $("chatMessages")?.appendChild(typing);
+
+  let out;
+  try {
+    out = await callAgentChatApi(userTextForHeuristic);
+  } finally {
+    $("chatTyping")?.remove();
+  }
+
+  applyChatPatch(out.patch || {});
+  appendChatBubble("assistant", out.assistant_message || "Done.");
+  if (out.suggest_optimize) {
+    appendChatBubble("assistant", "Running optimize on your backend now…", { skipHistory: true });
+    await onOptimize();
+  }
+}
+
+async function handleChatSend() {
+  const input = $("chatInput");
+  if (!input) return;
+  const raw = input.value.trim();
+  if (!raw) return;
+  input.value = "";
+  appendChatBubble("user", raw);
+  await finishChatTurn(raw);
+}
+
+async function handleQuickAction(action) {
+  const labels = {
+    same_setup: "Run the same setup again",
+    max_carbon: "Maximize carbon savings",
+    aggressive: "Be more aggressive",
+    close_now: "Keep it close to now",
+    what_if_earlier:
+      "If we start the optimized window one hour earlier than the recommendation, how much worse would CO₂ be vs the current optimized slot?",
+  };
+  const label = labels[action] || action;
+  appendChatBubble("user", label);
+
+  if (action === "what_if_earlier") {
+    await finishChatTurn(label);
+    return;
+  }
+
+  if (action === "same_setup") {
+    appendChatBubble("assistant", "Re-running with the same parameters.", { skipHistory: true });
+    await onOptimize();
+    return;
+  }
+  if (action === "max_carbon") {
+    shiftDatetimeLocal("deadline", 12);
+    appendChatBubble("assistant", "+12h on the deadline for a wider carbon search. Optimizing…", { skipHistory: true });
+    await onOptimize();
+    return;
+  }
+  if (action === "aggressive") {
+    shiftDatetimeLocal("deadline", 24);
+    appendChatBubble("assistant", "+24h on the deadline for a wider search. Optimizing…", { skipHistory: true });
+    await onOptimize();
+    return;
+  }
+  if (action === "close_now") {
+    applyTightDeadlineNearNow();
+    appendChatBubble("assistant", "Deadline pulled tight after start + duration. Optimizing…", { skipHistory: true });
+    await onOptimize();
+    return;
+  }
+}
+
+function maybeAppendAgentRunSummary(opt) {
+  if (getTabFromUrl() !== "agent") return;
+  const m = opt.metrics || {};
+  const req = opt.request || {};
+  const kg = (m.co2_saved_kg ?? 0).toFixed(1);
+  const pct = (m.percent_reduction ?? 0).toFixed(1);
+  const ex = ($("explainText") && $("explainText").textContent) || "";
+  const line1 = `Run complete: ${kg} kg CO₂ saved (${pct}% vs baseline) in ${req.region || "your zone"}.`;
+  const line2 = ex ? `Summary: ${ex}` : "";
+  appendChatBubble("assistant", line2 ? `${line1}\n\n${line2}` : line1);
+}
+
+function bindAgentChatUi() {
+  const chips = $("chatChips");
+  if (chips) {
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-chat-action]");
+      if (!btn) return;
+      handleQuickAction(btn.getAttribute("data-chat-action"));
+    });
+  }
+  const send = $("chatSendBtn");
+  if (send) send.addEventListener("click", () => handleChatSend());
+  const inp = $("chatInput");
+  if (inp) {
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleChatSend();
+      }
+    });
+  }
+  const link = $("linkDashboardFromChat");
+  if (link) link.addEventListener("click", () => setAppTab("dashboard", { push: true }));
+}
+
+/** @returns {"dashboard" | "agent"} */
+function getTabFromUrl() {
+  try {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "agent" || t === "dashboard") return t;
+  } catch {
+    /* ignore */
+  }
+  return "dashboard";
+}
+
+/**
+ * @param {"dashboard" | "agent"} tab
+ * @param {{ push?: boolean }} [opts]
+ */
+const _AGENT_MAIN_FILL = ["flex", "flex-col", "min-h-[calc(100dvh-4rem)]"];
+const _AGENT_PAGE_INTRO_SHRINK = ["shrink-0"];
+const _AGENT_CHAT_GROW = ["flex-1", "min-h-0"];
+
+function setAppTab(tab, opts = {}) {
+  const push = !!opts.push;
+  const appMain = $("appMain");
+  const pageIntro = $("pageIntro");
+  const topRow = $("topRow");
+  const agentPanel = $("agentChatPanel");
+  const title = $("pageTitle");
+  const sub = $("pageSubtitle");
+  const bd = $("tabBtnDashboard");
+  const ba = $("tabBtnAgent");
+
+  if (tab === "agent") {
+    _AGENT_MAIN_FILL.forEach((c) => appMain?.classList.add(c));
+    _AGENT_PAGE_INTRO_SHRINK.forEach((c) => pageIntro?.classList.add(c));
+    _AGENT_CHAT_GROW.forEach((c) => agentPanel?.classList.add(c));
+    if (topRow) {
+      topRow.classList.add("hidden");
+      topRow.classList.remove("flex", "flex-col", "flex-col-reverse");
+      topRow.classList.add("grid", "lg:grid-cols-2", "gap-6");
+    }
+    if (agentPanel) agentPanel.classList.remove("hidden");
+  } else {
+    _AGENT_MAIN_FILL.forEach((c) => appMain?.classList.remove(c));
+    _AGENT_PAGE_INTRO_SHRINK.forEach((c) => pageIntro?.classList.remove(c));
+    _AGENT_CHAT_GROW.forEach((c) => agentPanel?.classList.remove(c));
+    if (topRow) {
+      topRow.classList.remove("hidden");
+      topRow.classList.add("grid", "lg:grid-cols-2", "gap-6");
+    }
+    if (agentPanel) agentPanel.classList.add("hidden");
+  }
+
+  for (const el of document.querySelectorAll(".tab-dashboard-only")) {
+    if (tab === "agent") el.classList.add("hidden");
+    else el.classList.remove("hidden");
+  }
+
+  if (title) title.textContent = tab === "agent" ? "Talk to agent" : "Dashboard";
+  if (sub) {
+    sub.textContent =
+      tab === "agent"
+        ? "Chat about the run you just optimized—trade-offs like moving the window earlier—and get answers grounded in your timeline data when the agent is connected."
+        : "Pick a job, see the cleanest run window, and read why.";
+  }
+
+  const active = "px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-ink text-white";
+  const idle =
+    "px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold text-slate-600 hover:text-ink hover:bg-slate-50";
+  if (bd) bd.className = tab === "dashboard" ? active : idle;
+  if (ba) ba.className = tab === "agent" ? active : idle;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("tab", tab);
+  if (push) window.history.pushState({ tab }, "", url.toString());
+  else window.history.replaceState({ tab }, "", url.toString());
+
+  if (tab === "agent") ensureAgentWelcome();
+
+  if (CHART && tab === "dashboard") {
+    requestAnimationFrame(() => {
+      try {
+        CHART.resize();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
 }
 
 // ---- chart
@@ -740,15 +1209,93 @@ async function refreshRegions() {
 // doesn't lock the UI.
 let EXPLAIN_IN_FLIGHT = false;
 
+/** Ballpark fun lines when the agent is offline (aligned with agents/services/equivalency_service.py). */
+function localFunEquivalencies(opt) {
+  const kg = Number(opt?.metrics?.co2_saved_kg);
+  const x = Number.isFinite(kg) ? kg : 0;
+  if (x <= 0) {
+    return [
+      "This run did not beat the baseline on CO₂ — try widening the deadline or another zone.",
+      "No extra fun savings to show until the optimizer finds a cleaner window.",
+      "Same job; timing did not land on a lower-carbon slice this time.",
+    ];
+  }
+  const miles = Math.max(1, x / 0.35);
+  const phones = Math.max(10, Math.round(x / 0.034));
+  const weeks = Math.max(0.5, x / (0.025 * 0.42 * 24 * 7));
+  return [
+    `Roughly enough avoided CO₂ as skipping ~${miles.toFixed(0)} miles of average car driving (ballpark).`,
+    `About the same order of magnitude as ~${phones} smartphone full charges from the grid (illustrative).`,
+    `In the ballpark of running a modest laptop (~25 W) for ~${weeks.toFixed(1)} weeks at a typical grid factor — not exact science.`,
+  ];
+}
+
+function setFunEquivLoading() {
+  const ul = $("funEquivList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  const li = document.createElement("li");
+  li.className = "text-sm text-slate-500";
+  li.textContent = "Generating fun equivalencies…";
+  ul.appendChild(li);
+}
+
+function renderFunEquivs(lines) {
+  const ul = $("funEquivList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  const arr = Array.isArray(lines) ? lines : [];
+  const three = arr.slice(0, 3);
+  while (three.length < 3) three.push("Illustrative comparison — connect the agent for AI-phrased lines.");
+  for (const line of three) {
+    const li = document.createElement("li");
+    li.className = "flex gap-3 items-start";
+    const dot = document.createElement("span");
+    dot.className = "text-teal-600 font-bold shrink-0 select-none";
+    dot.textContent = "•";
+    const span = document.createElement("span");
+    span.className = "text-[15px] leading-snug text-slate-800";
+    span.textContent = line;
+    li.appendChild(dot);
+    li.appendChild(span);
+    ul.appendChild(li);
+  }
+}
+
+async function callEquivalencies(opt) {
+  const s = loadSettings();
+  const useBackend = !!s.backendUrl;
+  const base = useBackend ? s.backendUrl.replace(/\/$/, "") : (s.agentUrl || "").replace(/\/$/, "");
+  if (!base) {
+    renderFunEquivs(localFunEquivalencies(opt));
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/equivalencies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opt),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const arr = Array.isArray(data.equivalencies) ? data.equivalencies.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    if (arr.length >= 3) renderFunEquivs(arr);
+    else renderFunEquivs(localFunEquivalencies(opt));
+  } catch (e) {
+    console.warn("equivalencies failed", e);
+    renderFunEquivs(localFunEquivalencies(opt));
+  }
+}
+
 async function onOptimize() {
   const opt = await callOptimize();
   renderOptimize(opt);
+  persistLastRun(opt);
 
-  // Auto-explain: as soon as the optimizer returns, kick off the Gemma
-  // explanation so the user sees the "why" without a second click. There is
-  // no manual "Explain with AI" button anymore — Optimize is the single
-  // entry point and Explain is part of the same flow.
-  await onExplain();
+  // Auto-explain + fun equivalencies in parallel (both POST the same OptimizeResponse).
+  setFunEquivLoading();
+  await Promise.all([onExplain(), callEquivalencies(opt)]);
+  maybeAppendAgentRunSummary(opt);
 }
 
 async function onExplain() {
@@ -768,39 +1315,81 @@ async function onExplain() {
 }
 
 function openDrawer() {
-  $("drawer").classList.remove("hidden");
+  const d = $("drawer");
+  if (!d) return;
+  d.classList.remove("hidden");
   const s = loadSettings();
-  $("backendUrl").value = s.backendUrl ?? "";
-  $("agentUrl").value = s.agentUrl ?? "";
-  $("includeAudio").checked = !!s.includeAudio;
+  const bu = $("backendUrl");
+  const au = $("agentUrl");
+  const ia = $("includeAudio");
+  if (bu) bu.value = s.backendUrl ?? "";
+  if (au) au.value = s.agentUrl ?? "";
+  if (ia) ia.checked = !!s.includeAudio;
 }
-function closeDrawer() { $("drawer").classList.add("hidden"); }
+
+function closeDrawer() {
+  const d = $("drawer");
+  if (d) d.classList.add("hidden");
+}
+
+/** If URL contains `?settings=1`, open Connect data once then remove the param. */
+function consumeOpenSettingsParam() {
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("settings") !== "1") return;
+    u.searchParams.delete("settings");
+    window.history.replaceState({}, "", u.toString());
+    openDrawer();
+  } catch {
+    /* ignore */
+  }
+}
 
 function bind() {
   $("optimizeBtn").addEventListener("click", onOptimize);
-  $("optimizeTopBtn").addEventListener("click", onOptimize);
-  $("settingsBtn").addEventListener("click", openDrawer);
-  $("closeDrawer").addEventListener("click", closeDrawer);
-  $("drawerBackdrop").addEventListener("click", closeDrawer);
-  $("saveSettings").addEventListener("click", async () => {
-    saveSettings({
-      backendUrl: $("backendUrl").value.trim(),
-      agentUrl: $("agentUrl").value.trim(),
-      includeAudio: $("includeAudio").checked,
+
+  const connectBtn = $("connectDataBtn");
+  if (connectBtn) connectBtn.addEventListener("click", openDrawer);
+  const closeD = $("closeDrawer");
+  if (closeD) closeD.addEventListener("click", closeDrawer);
+  const backdrop = $("drawerBackdrop");
+  if (backdrop) backdrop.addEventListener("click", closeDrawer);
+
+  const saveBtn = $("saveSettings");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      saveSettings({
+        backendUrl: $("backendUrl").value.trim(),
+        agentUrl: $("agentUrl").value.trim(),
+        includeAudio: !!$("includeAudio").checked,
+      });
+      updateModeBadge();
+      closeDrawer();
+      await refreshRegions();
+      await refreshInstanceTypes();
     });
-    updateModeBadge();
-    closeDrawer();
-    await refreshRegions();
-    await refreshInstanceTypes();
-  });
-  $("resetSettings").addEventListener("click", async () => {
-    // Explicitly empty (not undefined) → loadSettings() preserves it as "demo mode".
-    saveSettings({ backendUrl: "", agentUrl: "", includeAudio: false });
-    updateModeBadge();
-    closeDrawer();
-    await refreshRegions();
-    await refreshInstanceTypes();
-  });
+  }
+  const resetBtn = $("resetSettings");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", async () => {
+      saveSettings({ backendUrl: "", agentUrl: "", includeAudio: false });
+      updateModeBadge();
+      const bu = $("backendUrl");
+      const au = $("agentUrl");
+      const ia = $("includeAudio");
+      if (bu) bu.value = "";
+      if (au) au.value = "";
+      if (ia) ia.checked = false;
+      closeDrawer();
+      await refreshRegions();
+      await refreshInstanceTypes();
+    });
+  }
+
+  const bd = $("tabBtnDashboard");
+  const ba = $("tabBtnAgent");
+  if (bd) bd.addEventListener("click", () => setAppTab("dashboard", { push: true }));
+  if (ba) ba.addEventListener("click", () => setAppTab("agent", { push: true }));
 
   const wp = $("workloadPreset");
   if (wp) wp.addEventListener("change", onWorkloadChange);
@@ -808,8 +1397,15 @@ function bind() {
   if (ip) ip.addEventListener("change", onInstanceChange);
 }
 
+window.addEventListener("popstate", () => {
+  setAppTab(getTabFromUrl(), { push: false });
+});
+
 document.addEventListener("DOMContentLoaded", async () => {
   bind();
+  bindAgentChatUi();
+  consumeOpenSettingsParam();
+  setAppTab(getTabFromUrl(), { push: false });
   updateModeBadge();
   // No on-load mock render — the result/chart/explain cards keep their static
   // empty-state copy from app.html until the user clicks "Optimize schedule".

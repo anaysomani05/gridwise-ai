@@ -4,6 +4,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+def _require_power_or_instance(power_kw: float | None, instance_type: str | None) -> None:
+    if power_kw is None and instance_type is None:
+        raise ValueError("either power_kw or instance_type must be provided")
+
+
 class OptimizeRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -35,10 +40,7 @@ class OptimizeRequest(BaseModel):
 
     @model_validator(mode="after")
     def _power_or_instance(self) -> "OptimizeRequest":
-        if self.power_kw is None and self.instance_type is None:
-            raise ValueError(
-                "either power_kw or instance_type must be provided"
-            )
+        _require_power_or_instance(self.power_kw, self.instance_type)
         return self
 
 
@@ -65,10 +67,7 @@ class CompareRegionsRequest(BaseModel):
 
     @model_validator(mode="after")
     def _power_or_instance(self) -> "CompareRegionsRequest":
-        if self.power_kw is None and self.instance_type is None:
-            raise ValueError(
-                "either power_kw or instance_type must be provided"
-            )
+        _require_power_or_instance(self.power_kw, self.instance_type)
         return self
 
 

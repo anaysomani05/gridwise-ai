@@ -1,11 +1,11 @@
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -70,28 +70,19 @@ def _tts():
     return text_to_speech
 
 
-# ---------------------------------------------------------------------------
-# Pydantic models — mirror the backend POST /optimize response exactly.
-#
-# Backend contract (frozen sample):
-# {
-#   "request":   { region, duration_hours, power_kw, deadline },
-#   "provider":  "electricity_maps",
-#   "signal_type": "carbon_intensity",
-#   "baseline":  { start, end, emissions_kg },
-#   "optimized": { start, end, emissions_kg },
-#   "metrics":   { co2_saved_kg, percent_reduction, deadline_met },
-#   "timeseries": [ { timestamp, signal } … ],
-#   "reasoning": { baseline_avg_signal, optimized_avg_signal,
-#                  dirtiest_hours_avoided, cleaner_hours_used },
-#   "source":    "live" | "fallback_demo_data"   (optional)
-# }
-#
-# Units:
-#   timeseries[].signal  — gCO₂eq/kWh
-#   emissions_kg         — kg CO₂
-#   All timestamps       — ISO 8601 UTC
-# ---------------------------------------------------------------------------
+def _chat_turn():
+    from services.chat_service import generate_chat_turn
+
+    return generate_chat_turn
+
+
+def _equiv():
+    from services.equivalency_service import generate_equivalencies
+
+    return generate_equivalencies
+
+
+# Pydantic models mirror backend POST /optimize (authoritative numbers for /explain).
 
 
 class RequestInfo(BaseModel):
@@ -158,6 +149,43 @@ class AudioExplainResponse(BaseModel):
     mime_type: str = "audio/mpeg"
 
 
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """Talk-to-agent: goals + optional last_run summary + optional last_optimize digest for negotiation."""
+
+    messages: list[ChatMessage]
+    last_run: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Slim summary from the browser (region, last metrics).",
+    )
+    last_optimize: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Digest of last POST /optimize (windows, metrics, timeseries) for what-if answers.",
+    )
+    form_state: dict[str, Any]
+
+
+class ChatResponse(BaseModel):
+    assistant_message: str
+    patch: dict[str, Any] = Field(default_factory=dict)
+    suggest_optimize: bool = False
+
+
+class EquivalenciesResponse(BaseModel):
+    """Exactly three short lines for the dashboard."""
+
+    equivalencies: list[str] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description="Three fun CO₂ analogies grounded in the optimize payload.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -173,6 +201,24 @@ def root():
 def health():
     """Health probe for load-balancers / CI checks."""
     return {"status": "ok", "service": "agents", "version": "1.0.0"}
+
+
+@app.post("/equivalencies", response_model=EquivalenciesResponse, tags=["Agent"])
+async def equivalencies(payload: OptimizeResponse):
+    """
+    Turn the POST /optimize JSON into three short, relatable CO₂-saved lines (Gemma),
+    with deterministic fallbacks if the model or key is unavailable.
+    """
+    gen = _equiv()
+    try:
+        lines = await gen(payload.model_dump())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Equivalency generation failed: {exc}"
+        ) from exc
+    if len(lines) != 3:
+        raise HTTPException(status_code=502, detail="Expected exactly three equivalency lines.")
+    return EquivalenciesResponse(equivalencies=lines)
 
 
 @app.post("/explain", response_model=ExplainResponse, tags=["Agent"])
@@ -202,6 +248,39 @@ async def explain(payload: OptimizeResponse):
         explanation_text=explanation_text,
         audio_available=audio_available,
     )
+
+
+@app.post("/chat", response_model=ChatResponse, tags=["Agent"])
+async def chat(req: ChatRequest):
+    """
+    Conversational assistant: returns prose plus an optional field patch.
+    Frontend merges the patch into the job form and may POST /optimize on the backend.
+    """
+    generate_chat_turn = _chat_turn()
+    msgs = [m.model_dump() for m in req.messages]
+    try:
+        out = await generate_chat_turn(
+            messages=msgs,
+            last_run=req.last_run,
+            form_state=req.form_state,
+            last_optimize=req.last_optimize,
+        )
+        return ChatResponse(**out)
+    except EnvironmentError:
+        return ChatResponse(
+            assistant_message=(
+                "I need GEMINI_API_KEY on this agent service to chat about your run and what-if timing trade-offs. "
+                "You can still use quick actions that update job fields locally, then press Optimize on the Dashboard."
+            ),
+            patch={},
+            suggest_optimize=False,
+        )
+    except Exception as exc:
+        return ChatResponse(
+            assistant_message=f"I hit a snag talking to the model ({exc!s}). Try a quick action or shorten your message.",
+            patch={},
+            suggest_optimize=False,
+        )
 
 
 @app.post("/explain/audio", response_model=AudioExplainResponse, tags=["Agent"])

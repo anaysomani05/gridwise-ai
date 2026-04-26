@@ -26,9 +26,15 @@ from schemas import (
 )
 from services import demo_data
 from services.instance_types import power_kw_for
-from services.metrics import percent_reduction
 
 UTC = timezone.utc
+
+
+def _percent_reduction(baseline: float, optimized: float) -> float:
+    """How much smaller optimized is than baseline (%); 0 if baseline is non-positive."""
+    if baseline <= 0:
+        return 0.0
+    return round(100.0 * (1.0 - optimized / baseline), 2)
 
 
 def _utc(dt: datetime) -> datetime:
@@ -253,17 +259,17 @@ def _run_optimize_core(
         raise ValueError("no feasible schedule: not enough time before the deadline for this duration")
 
     series = _load_series(region, start, dead)
-    m = _as_map(series.points)
-    if not m:
+    raw_map = _as_map(series.points)
+    if not raw_map:
         raise ValueError("no carbon data for this window")
 
     span_end = last_start + timedelta(hours=d - 1)
-    known_hours, span_h = _span_hour_coverage(m, first_start, span_end)
+    known_hours, span_h = _span_hour_coverage(raw_map, first_start, span_end)
 
     feasible: list[datetime] = []
     s = first_start
     while s <= last_start:
-        if _window_has_data(m, s, d):
+        if _window_has_data(raw_map, s, d):
             feasible.append(s)
         s += timedelta(hours=1)
     if not feasible:
@@ -273,6 +279,12 @@ def _run_optimize_core(
             "start_after to deadline range. Try a shorter horizon (e.g. next 24–48 hours from now), "
             "a smaller duration_hours, or a window starting closer to the present."
         )
+
+    span_start = first_start
+    span_end_for_spread = last_start + timedelta(hours=d - 1)
+    spread = _carbon_spread_in_span(raw_map, span_start, span_end_for_spread)
+
+    m = raw_map
 
     win_kg: dict[datetime, float] = {s: _window_kg(m, s, d, p_kw) for s in feasible}
 
@@ -286,11 +298,8 @@ def _run_optimize_core(
     o_hours = _window_hours_local(o_start, d)
 
     saved_kg = round(b_kg - o_kg, 2)
-    pct_kg = percent_reduction(b_kg, o_kg)
+    pct_kg = _percent_reduction(b_kg, o_kg)
 
-    span_start = first_start
-    span_end = last_start + timedelta(hours=d - 1)
-    spread = _carbon_spread_in_span(m, span_start, span_end)
     vhint = LOW_VARIATION_HINT if spread <= LOW_CARBON_SPREAD_G else None
 
     opt_note = _optimization_note(pct_kg, saved_kg)

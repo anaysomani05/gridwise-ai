@@ -6,9 +6,9 @@ Carbon-aware scheduling for flexible compute: given region, duration, power, ear
 
 | Path | Role |
 |------|------|
-| `backend/` | Optimizer API — grid signal, baseline vs optimized windows, metrics (`POST /optimize`). |
+| `backend/` | Optimizer API — `POST /optimize`; `POST /chat` and `POST /equivalencies` proxy to the agent so the UI can use one base URL. |
 | `frontend/` | Static dashboard + marketing page — form, chart, KPIs, Gemma explanation (optional audio). |
-| `agents/` | FastAPI layer — `POST /explain` and optional `POST /explain/audio` (Gemma + ElevenLabs). |
+| `agents/` | FastAPI layer — `POST /explain`, optional `POST /explain/audio`, `POST /equivalencies` (fun CO₂ lines), `POST /chat` (Gemma + optional ElevenLabs). |
 
 Each folder has its own README with setup and API notes.
 
@@ -23,13 +23,13 @@ cd agents && pip install -r requirements.txt && python main.py
 
 # Terminal 3 — UI
 cd frontend && python3 -m http.server 5500
-# Open http://localhost:5500/app.html — use “Connect APIs” if not on defaults.
+# Open http://localhost:5500/app.html — use “Connect data” (drawer) if not on defaults; switch Dashboard / Talk to agent in the header.
 ```
 
-**Env:** backend needs Electricity Maps (and/or WattTime) keys in `backend/.env`; agents need `GEMINI_API_KEY` for explanations. See each service README.
+**Env:** backend needs an Electricity Maps token in `backend/.env` for live carbon data; agents need `GEMINI_API_KEY` for explanations. See each service README.
 
 ## What ships today
 
 - Hourly carbon signal → contiguous-window optimization vs ASAP baseline  
-- Dashboard: timeline, savings KPIs, “why this schedule?” (structured times + Gemma prose; optional TTS)  
+- Single workspace (`app.html`): Dashboard vs Talk to agent tabs, **Connect data** side drawer for API URLs, timeline, KPIs, “why this schedule?” (Gemma; optional TTS)  
 - No persisted run history — each optimize/explain is stateless aside from browser `localStorage` for API URLs

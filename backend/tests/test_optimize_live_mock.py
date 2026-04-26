@@ -50,20 +50,22 @@ def test_live_mode_parses_past_and_forecast_then_caches(client, live_token_env, 
     call_counter = {"past_range": 0, "forecast": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "past-range" in request.url.path:
+        path = request.url.path
+        if "carbon-intensity/past-range" in path:
             call_counter["past_range"] += 1
             return httpx.Response(
                 200,
                 json={"history": _hourly(start, span_hours, sig)},
             )
-        if "forecast" in request.url.path:
+        if "carbon-intensity/forecast" in path:
             call_counter["forecast"] += 1
-            # forecast continues a few hours past the past-range
             future_start = start + timedelta(hours=span_hours)
             return httpx.Response(
                 200,
                 json={"forecast": _hourly(future_start, 4, sig[span_hours:])},
             )
+        if "renewable-percentage/forecast" in path or "total-load/forecast" in path or "net-load/forecast" in path:
+            return httpx.Response(200, json={"forecast": []})
         return httpx.Response(404)
 
     _install_mock_transport(monkeypatch, handler)
@@ -102,9 +104,12 @@ def test_live_mode_sparse_coverage(client, live_token_env, monkeypatch):
     partial = _hourly(start, 8, [220, 230, 240, 260, 280, 300, 320, 340])
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "past-range" in request.url.path:
+        path = request.url.path
+        if "carbon-intensity/past-range" in path:
             return httpx.Response(200, json={"history": partial})
-        if "forecast" in request.url.path:
+        if "carbon-intensity/forecast" in path:
+            return httpx.Response(200, json={"forecast": []})
+        if "renewable-percentage/forecast" in path or "total-load/forecast" in path or "net-load/forecast" in path:
             return httpx.Response(200, json={"forecast": []})
         return httpx.Response(404)
 

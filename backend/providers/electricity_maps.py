@@ -10,9 +10,10 @@ Base path used here: `{base}/v3/...` (set `ELECTRICITY_MAPS_BASE_URL` if your ac
 
 - GET /v3/carbon-intensity/past-range — `zone`, `start`, `end` (ISO UTC)
 - GET /v3/carbon-intensity/forecast — `zone`, `temporalGranularity=hourly` (horizon from “now”)
+- GET /v3/zones — zone catalog for the API token (`fetch_zones_catalog_rows`)
 
 Responses use a `history`, `data`, or `forecast` array of objects with
-`datetime` and `carbonIntensity` (gCO2e/kWh).
+`datetime` and `carbonIntensity` (gCO2e/kWh), or signal-specific numeric fields.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from typing import Any
 import httpx
 
 from config import settings
-from services.cache import provider_cache
+from services.cache import provider_cache, zones_catalog_cache
 
 
 class ElectricityMapsError(Exception):
@@ -190,3 +191,92 @@ def fetch_carbon_intensity_forecast(
             )
         provider_cache.set(cache_key, filtered)
         return filtered
+
+
+ZONES_CATALOG_CACHE_KEY = "v1"
+
+
+def _parse_zones_response(body: object) -> list[dict[str, str]]:
+    """
+    Normalize Electricity Maps /zones JSON into rows:
+    { "code", "zoneName", "countryCode" }.
+    """
+    if not isinstance(body, dict):
+        return []
+    root = body.get("zones")
+    if not isinstance(root, dict):
+        root = body
+    if not isinstance(root, dict):
+        return []
+
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(code: str, zone_name: str, country_code: str) -> None:
+        code = (code or "").strip()
+        if not code or code in seen:
+            return
+        seen.add(code)
+        rows.append(
+            {
+                "code": code,
+                "zoneName": (zone_name or code).strip(),
+                "countryCode": (country_code or "").strip(),
+            }
+        )
+
+    for key, val in root.items():
+        if not isinstance(val, dict):
+            continue
+        zk = str(val.get("zoneKey") or key).strip()
+        zn = str(val.get("zoneName") or val.get("zone_name") or zk).strip()
+        cc = str(val.get("countryCode") or val.get("country") or "").strip()
+        add(zk, zn, cc)
+        subs = val.get("subZoneKeys") or val.get("sub_zones") or []
+        if isinstance(subs, list):
+            for sub in subs:
+                if isinstance(sub, str) and sub.strip():
+                    s = sub.strip()
+                    add(s, s, cc)
+
+    rows.sort(key=lambda r: r["code"])
+    return rows
+
+
+def fetch_zones_catalog_rows() -> list[dict[str, str]] | None:
+    """
+    GET /v3/zones with auth-token.
+
+    Returns zones your token can access (cached ~1h). ``None`` if no token is
+    configured or the HTTP call fails (caller should fall back to the static
+    UI catalog).
+
+    On 401/403 or other HTTP errors, returns ``None`` so ``GET /regions`` can
+    still serve the static catalog without failing the request.
+    """
+    if not settings.electricity_maps_api_token:
+        return None
+
+    hit = zones_catalog_cache.get(ZONES_CATALOG_CACHE_KEY)
+    if hit is not None:
+        return hit
+
+    url = _base()
+    try:
+        with httpx.Client(timeout=45.0, headers=_headers()) as c:
+            r = c.get(f"{url}/zones")
+    except httpx.RequestError:
+        return None
+
+    if r.status_code in (401, 403, 404):
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        body = r.json()
+    except Exception:
+        return None
+
+    rows = _parse_zones_response(body)
+    zones_catalog_cache.set(ZONES_CATALOG_CACHE_KEY, rows)
+    return rows

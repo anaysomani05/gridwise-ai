@@ -3,7 +3,7 @@ def test_root_lists_endpoints(client):
     assert r.status_code == 200
     body = r.json()
     assert body["name"] == "GridWise API"
-    for key in ("optimize", "regions", "instance_types", "compare_regions", "health"):
+    for key in ("optimize", "chat", "equivalencies", "regions", "instance_types", "compare_regions", "health"):
         assert key in body, f"root index should advertise {key}"
 
 

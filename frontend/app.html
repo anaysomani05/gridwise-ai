@@ -50,30 +50,57 @@
       <nav class="hidden md:flex items-center gap-7">
         <a class="nav-link" href="./index.html">Home</a>
         <a class="nav-link" href="./index.html#how">How it works</a>
-        <a class="nav-link" href="./index.html#impact">Impact</a>
+        <a class="nav-link" href="./index.html#why">Why it matters</a>
       </nav>
-      <div class="flex items-center gap-2">
-        <button id="settingsBtn" class="btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold">Connect APIs</button>
-        <button id="optimizeTopBtn" class="btn-primary px-3.5 py-2 rounded-full text-sm font-semibold">Optimize</button>
+      <div class="flex items-center flex-wrap justify-end gap-2">
+        <div class="flex items-center rounded-full border border-black/10 p-0.5 bg-white/90">
+          <button type="button" id="tabBtnDashboard" class="px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold transition-colors">Dashboard</button>
+          <button type="button" id="tabBtnAgent" class="px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold transition-colors">Talk to agent</button>
+        </div>
+        <button type="button" id="connectDataBtn" class="btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold whitespace-nowrap">Connect data</button>
       </div>
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-6 py-8">
+  <main id="appMain" class="max-w-7xl mx-auto px-6 py-8">
     <!-- Header band -->
-    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+    <div id="pageIntro" class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
       <div>
         <span class="pill bg-white border border-black/5 text-ink2"><span class="badge-dot"></span>Carbon‑aware compute scheduling</span>
-        <h1 class="mt-3 text-3xl md:text-4xl font-black tracking-[-0.03em]">Dashboard</h1>
-        <p class="text-slate-600 mt-1">Pick a job, see the cleanest run window, and read why.</p>
+        <h1 id="pageTitle" class="mt-3 text-3xl md:text-4xl font-black tracking-[-0.03em]">Dashboard</h1>
+        <p id="pageSubtitle" class="text-slate-600 mt-1">Pick a job, see the cleanest run window, and read why.</p>
       </div>
       <div class="flex items-center gap-2"></div>
     </div>
 
-    <!-- Top row -->
-    <div class="mt-6 grid lg:grid-cols-2 gap-6">
+    <!-- Talk to agent: chat workspace (hidden on Dashboard tab) -->
+    <div id="agentChatPanel" class="hidden mt-6 card flex flex-col overflow-hidden shadow-sm">
+      <div class="px-4 py-3 border-b border-black/5 flex items-center justify-between gap-3 bg-white">
+        <span class="section-title mb-0">Scheduling assistant</span>
+        <button type="button" id="linkDashboardFromChat" class="text-sm font-semibold text-teal-700 hover:text-teal-900 whitespace-nowrap">Open Dashboard</button>
+      </div>
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/80 min-h-[200px]"></div>
+      <div id="chatChips" class="px-3 py-2 border-t border-black/5 flex flex-wrap gap-2 bg-white">
+        <button type="button" data-chat-action="same_setup" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-black/10 bg-white hover:bg-slate-50 text-ink">Run the same setup again</button>
+        <button type="button" data-chat-action="max_carbon" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-black/10 bg-white hover:bg-slate-50 text-ink">Maximize carbon savings</button>
+        <button type="button" data-chat-action="aggressive" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-black/10 bg-white hover:bg-slate-50 text-ink">Be more aggressive</button>
+        <button type="button" data-chat-action="close_now" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-black/10 bg-white hover:bg-slate-50 text-ink">Keep it close to now</button>
+        <button type="button" data-chat-action="what_if_earlier" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-teal-200 bg-teal-50/80 hover:bg-teal-50 text-teal-900">What if 1h earlier?</button>
+      </div>
+      <div class="p-3 border-t border-black/5 bg-white flex flex-col gap-2">
+        <p class="text-[11px] text-slate-500 leading-snug">After you optimize, try: &quot;If we start one hour earlier, how much worse is CO₂?&quot; or &quot;Why did we avoid the evening slot?&quot;</p>
+        <div class="flex gap-2 items-end">
+          <textarea id="chatInput" rows="2" class="input flex-1 resize-y min-h-[48px] text-sm" placeholder="What if we start one hour earlier?"></textarea>
+          <button type="button" id="chatSendBtn" class="btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold shrink-0">Send</button>
+        </div>
+        <p class="text-[11px] text-slate-500">With a <strong>backend</strong> URL set, chat uses <code class="text-[10px]">POST …/chat</code> on that same API (proxied to the agent). <strong>Optimize</strong> runs <code class="text-[10px]">POST …/optimize</code> there too. If only the agent URL is set, chat calls the agent directly; otherwise local heuristics.</p>
+      </div>
+    </div>
+
+    <!-- Top row: job form + recommendation (Dashboard tab only) -->
+    <div id="topRow" class="mt-6 grid lg:grid-cols-2 gap-6">
       <!-- Job form -->
-      <section class="card p-6">
+      <section id="jobFormSection" class="card p-6">
         <div class="flex items-center justify-between">
           <div class="section-title">New job</div>
           <span class="pill bg-mist text-ink2">/optimize</span>
@@ -165,14 +192,6 @@
             <input id="deadline" type="datetime-local" step="60" class="input mt-1" value="2026-04-26T08:00" />
             <div class="text-[11px] text-slate-500 mt-1">This will be converted to ISO UTC.</div>
           </div>
-          <div class="col-span-2">
-            <div class="label">Optimization mode</div>
-            <select id="mode" class="input mt-1">
-              <option value="carbon">Carbon</option>
-              <option value="balanced">Balanced</option>
-              <option value="cost">Cost</option>
-            </select>
-          </div>
         </div>
         <div class="mt-5 flex items-center gap-2">
           <button id="optimizeBtn" class="btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-2">
@@ -184,7 +203,7 @@
       </section>
 
       <!-- Recommendation -->
-      <section class="card p-6 relative overflow-hidden">
+      <section id="recoSection" class="card p-6 relative overflow-hidden">
         <div class="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-teal-200/40 blur-3xl"></div>
         <div class="relative">
           <div class="flex items-center justify-between">
@@ -236,7 +255,7 @@
     </div>
 
     <!-- Chart -->
-    <section class="mt-6 card p-6">
+    <section id="chartSection" class="tab-dashboard-only mt-6 card p-6">
       <div class="flex items-center justify-between">
         <div>
           <div class="section-title">Carbon timeline</div>
@@ -251,7 +270,7 @@
     </section>
 
     <!-- Impact -->
-    <section class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+    <section id="impactSection" class="tab-dashboard-only mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="kpi">
         <div class="label">Baseline emissions</div>
         <div class="mt-1 text-2xl font-bold tracking-tight"><span id="baselineKg">—</span> <span class="text-base text-slate-500 font-semibold">kg</span></div>
@@ -270,38 +289,49 @@
       </div>
     </section>
 
-    <details class="mt-8">
+    <section id="funEquivSection" class="tab-dashboard-only mt-6 card p-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div class="section-title">Fun equivalencies</div>
+        </div>
+      </div>
+      <ul id="funEquivList" class="mt-4 space-y-3 list-none pl-0">
+        <li id="funEquivPlaceholder" class="text-sm text-slate-400">Run <strong class="text-slate-600">Optimize schedule</strong> to generate equivalencies.</li>
+      </ul>
+    </section>
+
+    <details class="tab-dashboard-only mt-8">
       <summary class="text-xs text-slate-500 cursor-pointer">Debug · current optimize JSON</summary>
       <pre id="rawJson" class="mt-2 p-4 rounded-xl bg-white border border-black/5 text-[12px] overflow-auto max-h-[420px]"></pre>
     </details>
   </main>
 
-  <!-- Settings drawer -->
+  <!-- Connect data: same page, no separate hub -->
   <div id="drawer" class="fixed inset-0 z-40 hidden">
     <div id="drawerBackdrop" class="absolute inset-0 bg-black/30"></div>
-    <aside class="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-black/10 p-6 overflow-y-auto">
+    <aside class="absolute right-0 top-0 h-full w-full max-w-[420px] bg-white border-l border-black/10 p-6 overflow-y-auto shadow-xl">
       <div class="flex items-center justify-between">
-        <h3 class="font-bold tracking-tight">Connect APIs</h3>
-        <button id="closeDrawer" class="text-slate-500 hover:text-ink">✕</button>
+        <h3 class="font-bold tracking-tight">Connect data</h3>
+        <button type="button" id="closeDrawer" class="text-slate-500 hover:text-ink" aria-label="Close">✕</button>
       </div>
-      <p class="text-sm text-slate-600 mt-2">Leave blank to use demo data.</p>
+      <p class="text-sm text-slate-600 mt-2">Backend and agent URLs for this browser. Leave blank to use demo data.</p>
       <div class="mt-5 space-y-4">
         <div>
           <div class="label">Backend base URL</div>
           <input id="backendUrl" class="input mt-1" placeholder="http://localhost:8000" />
-          <div class="text-[12px] text-slate-500 mt-1">Calls <code>POST {url}/optimize</code></div>
+          <div class="text-[12px] text-slate-500 mt-1">Calls <code class="text-xs">POST …/optimize</code></div>
         </div>
         <div>
           <div class="label">Agent base URL</div>
           <input id="agentUrl" class="input mt-1" placeholder="http://localhost:8001" />
-          <div class="text-[12px] text-slate-500 mt-1">Calls <code>POST {url}/explain</code></div>
+          <div class="text-[12px] text-slate-500 mt-1">Calls <code class="text-xs">POST …/explain</code> (and <code class="text-xs">/chat</code> when no backend). If you set a backend URL, the dashboard also proxies <code class="text-xs">POST …/equivalencies</code> here.</div>
         </div>
         <label class="flex items-center gap-2 text-sm">
           <input id="includeAudio" type="checkbox" />
           Include audio explanation (ElevenLabs)
         </label>
-        <button id="saveSettings" class="w-full btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold">Save</button>
-        <button id="resetSettings" class="w-full btn-secondary px-4 py-2.5 rounded-xl text-sm font-semibold">Use demo data</button>
+        <button type="button" id="saveSettings" class="w-full btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold">Save</button>
+        <button type="button" id="resetSettings" class="w-full btn-secondary px-4 py-2.5 rounded-xl text-sm font-semibold">Use demo data</button>
       </div>
     </aside>
   </div>

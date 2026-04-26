@@ -33,16 +33,18 @@ def _reset_caches_and_env():
     classes stable across tests.
     """
     from config import settings
-    from services.cache import provider_cache
+    from services.cache import provider_cache, zones_catalog_cache
 
     saved_token = settings.electricity_maps_api_token
     settings.electricity_maps_api_token = None
     provider_cache.clear()
+    zones_catalog_cache.clear()
     try:
         yield
     finally:
         settings.electricity_maps_api_token = saved_token
         provider_cache.clear()
+        zones_catalog_cache.clear()
 
 
 @pytest.fixture
@@ -58,12 +60,14 @@ def client():
 def live_token_env():
     """Flip the live-API code path on for the duration of one test."""
     from config import settings
-    from services.cache import provider_cache
+    from services.cache import provider_cache, zones_catalog_cache
 
     settings.electricity_maps_api_token = "test-token-not-real"
     provider_cache.clear()
+    zones_catalog_cache.clear()
     try:
         yield
     finally:
         settings.electricity_maps_api_token = None
         provider_cache.clear()
+        zones_catalog_cache.clear()

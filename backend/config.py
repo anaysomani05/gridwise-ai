@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     electricity_maps_api_token: str | None = None
     electricity_maps_base_url: str = "https://api.electricitymaps.com/v3"
 
+    # Talk-to-agent: backend proxies POST /chat → agent layer (same host the UI uses for /optimize)
+    agent_service_url: str = "http://127.0.0.1:8001"
+
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5500,http://127.0.0.1:5500,"

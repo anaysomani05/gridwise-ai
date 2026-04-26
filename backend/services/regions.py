@@ -1,19 +1,20 @@
 """
-Curated catalog of regions (Electricity Maps zone codes) we expose to the UI.
+Region catalog for the UI (Electricity Maps zone codes).
 
-Each entry carries:
-- `code`: the Electricity Maps zone string (what we send to the API).
-- `label`: a human-friendly name for the dropdown.
-- `country`: ISO-ish country/region grouping.
-- `variation_hint`: short tag the UI can use to set expectations
-  ("strong daily swing" vs "mostly flat").
+- **Curated** rows in `_REGIONS` keep hand-written labels, cloud hints, and
+  `variation_hint` for zones we care about most in demos.
+- When `ELECTRICITY_MAPS_API_TOKEN` is set, `GET /regions` **also merges** zones
+  from Electricity Maps `GET /v3/zones` (cached ~1h) so your API plan can expose
+  every zone your token can access, not only the static list.
 
-Only this file decides which zones the frontend offers — there is no magic
-"any zone" mode. Add a row here to support a new region.
+Add or edit rows in `_REGIONS` for nicer copy; the EM merge only appends zones
+that are not already present by `code`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from providers.electricity_maps import fetch_zones_catalog_rows
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,40 @@ class Region:
     label: str
     country: str
     variation_hint: str  # "strong" | "moderate" | "flat"
+
+
+_COUNTRY_LABEL: dict[str, str] = {
+    "US": "United States",
+    "DE": "Germany",
+    "FR": "France",
+    "GB": "United Kingdom",
+    "ES": "Spain",
+    "SE": "Sweden",
+    "NO": "Norway",
+    "FI": "Finland",
+    "PL": "Poland",
+    "IN": "India",
+    "AU": "Australia",
+    "JP": "Japan",
+    "CA": "Canada",
+    "BR": "Brazil",
+    "NL": "Netherlands",
+    "IT": "Italy",
+    "AT": "Austria",
+    "CH": "Switzerland",
+    "DK": "Denmark",
+    "IE": "Ireland",
+    "PT": "Portugal",
+    "NZ": "New Zealand",
+    "KR": "South Korea",
+    "SG": "Singapore",
+    "MX": "Mexico",
+}
+
+
+def _country_label(iso2: str) -> str:
+    cc = (iso2 or "").strip().upper()
+    return _COUNTRY_LABEL.get(cc, cc or "Other")
 
 
 _REGIONS: list[Region] = [
@@ -85,11 +120,49 @@ _REGIONS: list[Region] = [
 _BY_CODE: dict[str, Region] = {r.code: r for r in _REGIONS}
 
 
+def _regions_from_em_catalog() -> list[Region]:
+    rows = fetch_zones_catalog_rows()
+    if not rows:
+        return []
+    seen = {r.code for r in _REGIONS}
+    extra: list[Region] = []
+    for row in rows:
+        code = row.get("code") or ""
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        zn = row.get("zoneName") or code
+        cc = row.get("countryCode") or ""
+        label = f"{zn} ({code})"
+        extra.append(
+            Region(
+                code=code,
+                label=label,
+                country=_country_label(cc),
+                variation_hint="moderate",
+            )
+        )
+    extra.sort(key=lambda r: r.code)
+    return extra
+
+
 def list_regions() -> list[Region]:
-    """All curated regions, in display order."""
-    return list(_REGIONS)
+    """Curated regions first, then any extra zones from Electricity Maps /zones."""
+    return list(_REGIONS) + _regions_from_em_catalog()
 
 
 def get_region(code: str) -> Region | None:
-    """Look up a curated region by Electricity Maps zone code."""
-    return _BY_CODE.get(code)
+    """Curated row wins; else a synthetic row if the code appears in the EM catalog."""
+    if code in _BY_CODE:
+        return _BY_CODE[code]
+    for row in fetch_zones_catalog_rows() or []:
+        if row.get("code") == code:
+            zn = row.get("zoneName") or code
+            cc = row.get("countryCode") or ""
+            return Region(
+                code=code,
+                label=f"{zn} ({code})",
+                country=_country_label(cc),
+                variation_hint="moderate",
+            )
+    return None

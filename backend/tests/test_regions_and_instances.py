@@ -1,3 +1,39 @@
+def test_regions_merges_zones_from_em_api(client, live_token_env, monkeypatch):
+    import httpx
+
+    from services.cache import zones_catalog_cache
+
+    zones_catalog_cache.clear()
+    real_client = httpx.Client
+
+    def factory(*args, **kwargs):
+        kwargs.pop("transport", None)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/zones"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "XX-GRIDWISE-TEST": {
+                            "zoneKey": "XX-GRIDWISE-TEST",
+                            "zoneName": "API test grid",
+                            "countryCode": "XX",
+                            "subZoneKeys": [],
+                        }
+                    },
+                )
+            return httpx.Response(404)
+
+        return real_client(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", factory)
+    r = client.get("/regions")
+    assert r.status_code == 200
+    codes = {row["code"] for row in r.json()["regions"]}
+    assert "XX-GRIDWISE-TEST" in codes
+    assert "US-CAL-CISO" in codes
+
+
 def test_regions_endpoint_returns_curated_list(client):
     r = client.get("/regions")
     assert r.status_code == 200

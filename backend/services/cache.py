@@ -76,3 +76,9 @@ provider_cache: TTLCache[tuple[str, str, str], list[dict[str, str | float]]] = T
     ttl_seconds=300.0,
     max_size=128,
 )
+
+# GET /v3/zones catalog (per API token) — cached ~1h to avoid large payload on every /regions.
+zones_catalog_cache: TTLCache[str, list[dict[str, str]]] = TTLCache(
+    ttl_seconds=3600.0,
+    max_size=4,
+)
