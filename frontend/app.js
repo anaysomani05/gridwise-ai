@@ -2,6 +2,8 @@
 //
 // Wire-up summary (must stay in sync with backend/main.py and agents/main.py):
 //   POST {backendUrl}/optimize        -> OptimizeResponse  (see backend/schemas.py)
+//                                     body may include instance_type (preset id) with
+//                                     power_kw null, or power_kw alone for Custom hardware
 //   POST {agentUrl}/explain           body = OptimizeResponse
 //                                     -> { explanation_text, audio_available }
 //   POST {agentUrl}/explain/audio     body = OptimizeResponse
@@ -15,6 +17,53 @@ const STORE_KEY = "gridwise.settings.v1";
 
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 const DEFAULT_AGENT_URL = "http://localhost:8001";
+
+/** Default duration_hours when user picks a workload preset (matches product spec). */
+const WORKLOAD_DEFAULT_HOURS = {
+  training: 12,
+  llm_finetune: 4,
+  batch_inference: 2,
+  etl: 2,
+  analytics: 1,
+};
+
+/** Dashboard instance presets first; must match backend/services/instance_types.py order of preset.* */
+const DASHBOARD_PRESET_ORDER = [
+  "preset.a100_pcie",
+  "preset.a100_sxm",
+  "preset.a100_node8",
+  "preset.h100_node8",
+  "preset.cluster_multinode",
+  "preset.cpu_node",
+];
+
+/**
+ * Offline mirror of GET /instance-types (shape: { name, power_kw, label, category }).
+ * Kept in sync with backend/services/instance_types.py for demo-mode math.
+ */
+const FALLBACK_INSTANCE_TYPES_LIST = [
+  { name: "preset.a100_pcie", power_kw: 0.3, label: "Single A100 GPU (PCIe)", category: "gpu" },
+  { name: "preset.a100_sxm", power_kw: 0.4, label: "Single A100 GPU (SXM)", category: "gpu" },
+  { name: "preset.a100_node8", power_kw: 6, label: "8× A100 node (full server)", category: "gpu" },
+  { name: "preset.h100_node8", power_kw: 10, label: "8× H100 node (full server)", category: "gpu" },
+  { name: "preset.cluster_multinode", power_kw: 32, label: "Multi-node training cluster", category: "training-cluster" },
+  { name: "preset.cpu_node", power_kw: 0.5, label: "CPU-only compute node", category: "cpu" },
+  { name: "cpu.small", power_kw: 0.05, label: "1 vCPU general-purpose VM", category: "cpu" },
+  { name: "cpu.medium", power_kw: 0.15, label: "4 vCPU general-purpose VM", category: "cpu" },
+  { name: "cpu.large", power_kw: 0.4, label: "16 vCPU general-purpose VM", category: "cpu" },
+  { name: "cpu.xlarge", power_kw: 1.1, label: "64 vCPU compute node", category: "cpu" },
+  { name: "gpu.t4", power_kw: 0.3, label: "1× NVIDIA T4 inference VM", category: "gpu" },
+  { name: "gpu.l4", power_kw: 0.45, label: "1× NVIDIA L4 inference VM", category: "gpu" },
+  { name: "gpu.a10", power_kw: 0.65, label: "1× NVIDIA A10 inference VM", category: "gpu" },
+  { name: "gpu.a100.40g", power_kw: 1.2, label: "1× NVIDIA A100 40GB", category: "gpu" },
+  { name: "gpu.a100.80g.x4", power_kw: 5, label: "4× NVIDIA A100 80GB training VM", category: "gpu" },
+  { name: "gpu.h100.x1", power_kw: 2.2, label: "1× NVIDIA H100 SXM", category: "gpu" },
+  { name: "gpu.h100.x8", power_kw: 12, label: "8× NVIDIA H100 SXM training VM", category: "gpu" },
+  { name: "gpu.h100.x64", power_kw: 96, label: "8-node H100 cluster (64 GPUs)", category: "training-cluster" },
+];
+
+/** name -> power_kw for buildSmartMock; rebuilt when /instance-types succeeds. */
+let instancePowerKwByName = Object.fromEntries(FALLBACK_INSTANCE_TYPES_LIST.map((i) => [i.name, i.power_kw]));
 
 let CHART = null;
 // Holds the most recent optimize response. Null until the user clicks Optimize;
@@ -231,8 +280,8 @@ function renderOptimize(opt) {
   $("rawJson").textContent = JSON.stringify(opt, null, 2);
 }
 
-// Two-row "Original time / Optimised time" header that sits above the Gemma
-// prose. Sourced from opt.baseline / opt.optimized so it always agrees with
+// Two-row "Baseline / Recommended window" header above the Gemma prose.
+// Sourced from opt.baseline / opt.optimized so it always agrees with
 // the recommendation card and updates the instant /optimize returns — no
 // waiting on the agent round-trip. When baseline == optimized we collapse the
 // second row into a short "Same as original" hint instead of repeating the
@@ -246,7 +295,7 @@ function renderTimeShift(opt) {
 
   const originalStr = formatHumanWindow(b.start, b.end);
   const optimisedStr = sameWindow
-    ? "Same as original — no cleaner window in this range"
+    ? "Same as baseline — no cleaner slot in this search range"
     : formatHumanWindow(o.start, o.end);
 
   const labelCls = "text-ink2 font-medium";
@@ -254,9 +303,9 @@ function renderTimeShift(opt) {
   const optimisedValueCls = sameWindow ? "text-slate-500 italic" : valueCls;
 
   block.innerHTML =
-    `<div class="${labelCls}">Original time</div>` +
+    `<div class="${labelCls}">Baseline (if you ran ASAP)</div>` +
     `<div class="${valueCls}">${originalStr}</div>` +
-    `<div class="${labelCls}">Optimised time</div>` +
+    `<div class="${labelCls}">Recommended window</div>` +
     `<div class="${optimisedValueCls}">${optimisedStr}</div>`;
 }
 
@@ -317,14 +366,31 @@ function renderExplain(exp) {
 // ---- API calls
 // Matches backend/schemas.py::OptimizeRequest. duration_hours is an int.
 function buildPayload() {
-  return {
+  const base = {
     region: $("region").value,
     job_name: $("jobName").value || "job",
     duration_hours: Math.max(1, Math.round(Number($("durationHours").value) || 1)),
-    power_kw: Number($("powerKw").value) || 1,
     start_after: localToUtcIso($("startAfter").value),
     deadline: localToUtcIso($("deadline").value),
   };
+  const inst = $("instancePreset") && $("instancePreset").value;
+  if (inst === "__custom__") {
+    base.power_kw = Number($("powerKw").value) || 1;
+  } else if (inst) {
+    base.instance_type = inst;
+    base.power_kw = null;
+  } else {
+    base.power_kw = Number($("powerKw").value) || 1;
+  }
+  return base;
+}
+
+function effectivePowerKwFromPayload(payload) {
+  if (payload.instance_type != null && payload.instance_type !== "") {
+    const p = instancePowerKwByName[payload.instance_type];
+    if (p != null) return Number(p);
+  }
+  return Number(payload.power_kw) || 1;
 }
 
 // Build a smart mock result from whatever the user entered in the form.
@@ -333,7 +399,7 @@ function buildSmartMock(payload) {
   const startAfter = new Date(payload.start_after || "2026-04-25T18:00:00Z");
   const deadline   = new Date(payload.deadline   || "2026-04-26T08:00:00Z");
   const durH       = Number(payload.duration_hours) || 4;
-  const powerKw    = Number(payload.power_kw)       || 12;
+  const powerKw    = effectivePowerKwFromPayload(payload);
 
   // Generate 24-hour synthetic carbon curve anchored to startAfter
   const hours = [];
@@ -417,22 +483,67 @@ async function callOptimize() {
   }
 }
 
+/** Short hedged “why” lines for demo /explain when the agent is offline (not sent to Gemma). */
+const DEMO_REGION_WHY = {
+  "US-CAL-CISO":
+    "California often sees solar-rich midday and steeper emissions when gas peakers and imports ramp after sunset, so evening and overnight buckets can carry more carbon than afternoon shoulder hours.",
+  "US-TEX-ERCO":
+    "ERCOT frequently has strong overnight wind while daytime demand pulls on gas, which can make late-afternoon slices dirtier than the small hours.",
+  "US-MIDA-PJM":
+    "PJM spans many plants and ties; hourly carbon often tracks demand peaks and whichever marginal units are setting the tone that hour.",
+  "US-MIDW-MISO":
+    "MISO shows similar demand-driven swings across coal, gas, and wind in the Midwest footprint.",
+  "US-NW-PACW":
+    "The Pacific Northwest mixes hydro with regional thermal resources; the hourly curve still shifts with river conditions and load.",
+  IN: "Country-level India averages many states; intensity often tracks evening load when thermal plants carry more marginal generation.",
+  "IN-NO": "Northern India often peaks on hot afternoons and evenings when cooling and industry load are high.",
+  "IN-SO": "Southern India shows a similar demand-driven ramp, with late night often calmer than early evening.",
+  "AU-NSW":
+    "NSW can show strong solar midday with higher marginal emissions in the early evening when gas turbines pick up.",
+  DE: "Germany couples large wind and solar with thermal reserves; the curve reflects when renewables are scarce versus abundant.",
+  FR: "France is nuclear-heavy, so the signal is usually flatter — small shifts here are often about demand and imports, not a dramatic fuel swap.",
+};
+
 function buildSmartExplain(opt) {
   const m = opt.metrics || {};
   const b = opt.baseline || {};
   const o = opt.optimized || {};
   const r = opt.reasoning || {};
-  const pct  = (m.percent_reduction ?? 0).toFixed(1);
-  const kg   = (m.co2_saved_kg ?? 0).toFixed(1);
-  const bAvg = r.baseline_avg_signal || "higher";
-  const oAvg = r.optimized_avg_signal || "lower";
-  const bStart = fmtIso(b.start || "");
-  const oStart = fmtIso(o.start || "");
+  const req = opt.request || {};
+  const pct = (m.percent_reduction ?? 0).toFixed(1);
+  const kg = (m.co2_saved_kg ?? 0).toFixed(1);
+  const bAvg = r.baseline_avg_signal;
+  const oAvg = r.optimized_avg_signal;
+  const region = req.region || "this grid";
+  const saved = Number(m.co2_saved_kg) || 0;
+  const sameWindow = b.start === o.start && b.end === o.end;
+
+  if (sameWindow || saved <= 0) {
+    return {
+      text_explanation:
+        `Across ${region}, the carbon-intensity curve in your search window does not contain a cleaner contiguous run than starting at the earliest allowed time, ` +
+        `so the optimizer keeps the baseline window. ` +
+        `Typical averages sit near ${bAvg ?? "—"} gCO₂e/kWh here — widening the deadline or choosing a zone with a wider daily swing usually unlocks more flexibility.`,
+    };
+  }
+
+  const dirty = (r.dirtiest_hours_avoided || []).slice(0, 6).join(", ");
+  const clean = (r.cleaner_hours_used || []).slice(0, 6).join(", ");
+  const dataSentence =
+    dirty || clean
+      ? `The schedule moves work away from the highest-carbon UTC hours flagged in this run (${dirty || "n/a"}) and into cleaner buckets (${clean || "n/a"}). `
+      : "The schedule targets a contiguous slice whose average carbon is lower than starting immediately. ";
+
+  const why =
+    DEMO_REGION_WHY[region] ||
+    `For ${region}, the demo curve suggests those hours simply carry a lower marginal emissions factor than the baseline slice. `;
+
   return {
     text_explanation:
-      `Running at ${bStart} would overlap higher-carbon grid conditions (avg ${bAvg} gCO2/kWh). ` +
-      `GridWise identified a cleaner window starting at ${oStart} (avg ${oAvg} gCO2/kWh) that still meets the deadline, ` +
-      `cutting estimated emissions by ${pct}% and avoiding approximately ${kg} kg CO2 — same work, smarter timing.`
+      `${dataSentence}` +
+      `${why} ` +
+      `Average grid carbon goes from ${bAvg ?? "—"} to ${oAvg ?? "—"} gCO₂e/kWh, saving ${kg} kg CO₂ — a ${pct}% improvement for this job length and power draw. ` +
+      `Same workload; the win is timing the draw when the grid is less carbon-intense.`,
   };
 }
 
@@ -481,6 +592,91 @@ async function callExplain(opt) {
     console.warn("explain failed", e);
     return buildSmartExplain(opt);
   }
+}
+
+function syncCustomPowerVisibility() {
+  const wrap = $("customPowerWrap");
+  const sel = $("instancePreset");
+  if (!wrap || !sel) return;
+  if (sel.value === "__custom__") wrap.classList.remove("hidden");
+  else wrap.classList.add("hidden");
+}
+
+function onWorkloadChange() {
+  const w = $("workloadPreset").value;
+  const h = WORKLOAD_DEFAULT_HOURS[w] ?? 4;
+  $("durationHours").value = String(h);
+}
+
+function onInstanceChange() {
+  syncCustomPowerVisibility();
+}
+
+async function callInstanceTypes() {
+  const s = loadSettings();
+  if (!s.backendUrl) return null;
+  try {
+    const url = `${s.backendUrl.replace(/\/$/, "")}/instance-types`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return Array.isArray(data.instance_types) && data.instance_types.length ? data.instance_types : null;
+  } catch (e) {
+    console.warn("instance-types failed", e);
+    return null;
+  }
+}
+
+async function refreshInstanceTypes() {
+  const sel = $("instancePreset");
+  if (!sel) return;
+
+  const previous = sel.value;
+  let items = await callInstanceTypes();
+  if (!items) items = FALLBACK_INSTANCE_TYPES_LIST.slice();
+
+  instancePowerKwByName = {};
+  for (const it of items) instancePowerKwByName[it.name] = it.power_kw;
+
+  const customOpt = document.createElement("option");
+  customOpt.value = "__custom__";
+  customOpt.textContent = "Custom (enter kW)";
+
+  sel.innerHTML = "";
+  sel.appendChild(customOpt);
+
+  const presetSet = new Set(DASHBOARD_PRESET_ORDER);
+  for (const name of DASHBOARD_PRESET_ORDER) {
+    const it = items.find((x) => x.name === name);
+    if (!it) continue;
+    const opt = document.createElement("option");
+    opt.value = it.name;
+    opt.textContent = it.label;
+    sel.appendChild(opt);
+  }
+
+  const legacy = items
+    .filter((it) => !presetSet.has(it.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (legacy.length) {
+    const og = document.createElement("optgroup");
+    og.label = "Advanced (legacy SKUs)";
+    for (const it of legacy) {
+      const opt = document.createElement("option");
+      opt.value = it.name;
+      opt.textContent = it.label;
+      og.appendChild(opt);
+    }
+    sel.appendChild(og);
+  }
+
+  const prefer = "preset.a100_node8";
+  if (previous && previous !== "__custom__" && [...sel.options].some((o) => o.value === previous)) {
+    sel.value = previous;
+  } else if ([...sel.options].some((o) => o.value === prefer)) {
+    sel.value = prefer;
+  }
+  syncCustomPowerVisibility();
 }
 
 // Pull the canonical zone list from the backend so the region dropdown stays in
@@ -586,7 +782,7 @@ function bind() {
   $("settingsBtn").addEventListener("click", openDrawer);
   $("closeDrawer").addEventListener("click", closeDrawer);
   $("drawerBackdrop").addEventListener("click", closeDrawer);
-  $("saveSettings").addEventListener("click", () => {
+  $("saveSettings").addEventListener("click", async () => {
     saveSettings({
       backendUrl: $("backendUrl").value.trim(),
       agentUrl: $("agentUrl").value.trim(),
@@ -594,23 +790,29 @@ function bind() {
     });
     updateModeBadge();
     closeDrawer();
-    // New backend URL might support a different region set — re-pull it.
-    refreshRegions();
+    await refreshRegions();
+    await refreshInstanceTypes();
   });
-  $("resetSettings").addEventListener("click", () => {
+  $("resetSettings").addEventListener("click", async () => {
     // Explicitly empty (not undefined) → loadSettings() preserves it as "demo mode".
     saveSettings({ backendUrl: "", agentUrl: "", includeAudio: false });
     updateModeBadge();
     closeDrawer();
+    await refreshRegions();
+    await refreshInstanceTypes();
   });
+
+  const wp = $("workloadPreset");
+  if (wp) wp.addEventListener("change", onWorkloadChange);
+  const ip = $("instancePreset");
+  if (ip) ip.addEventListener("change", onInstanceChange);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   bind();
   updateModeBadge();
   // No on-load mock render — the result/chart/explain cards keep their static
   // empty-state copy from app.html until the user clicks "Optimize schedule".
-  // Populate the region dropdown from /regions; keeps frontend and backend in sync.
-  // Falls back silently to the hardcoded HTML <option>s if the backend is offline.
-  refreshRegions();
+  await refreshInstanceTypes();
+  await refreshRegions();
 });

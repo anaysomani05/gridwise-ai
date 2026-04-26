@@ -91,10 +91,11 @@
             -->
             <select id="region" class="input mt-1">
               <optgroup label="United States">
-                <option value="US-CAL-CISO">California (CAISO)</option>
+                <option value="US-CAL-CISO">California (CAISO) — Azure westus (US-CAL-CISO)</option>
                 <option value="US-TEX-ERCO">Texas (ERCOT)</option>
-                <option value="US-NW-PACW">Pacific Northwest (PACW)</option>
-                <option value="US-MIDA-PJM">PJM (Mid-Atlantic)</option>
+                <option value="US-NW-PACW">Pacific Northwest — AWS us-west-2 Oregon (US-NW-PACW)</option>
+                <option value="US-MIDA-PJM">PJM — AWS us-east-1 / Azure eastus Virginia (US-MIDA-PJM)</option>
+                <option value="US-MIDW-MISO">Central US (MISO) — GCP us-central1 Iowa (US-MIDW-MISO)</option>
                 <option value="US-NE-ISNE">New England (ISO-NE)</option>
                 <option value="US-NY-NYIS">New York (NYISO)</option>
               </optgroup>
@@ -109,9 +110,10 @@
                 <option value="PL">Poland</option>
               </optgroup>
               <optgroup label="Asia &amp; Pacific">
-                <option value="IN-NO">India (Northern Grid)</option>
-                <option value="IN-SO">India (Southern Grid)</option>
-                <option value="AU-NSW">Australia (NSW)</option>
+                <option value="IN">India (country) — AWS ap-south-1 Mumbai (IN)</option>
+                <option value="IN-NO">India — Northern grid (IN-NO)</option>
+                <option value="IN-SO">India — Southern grid (IN-SO)</option>
+                <option value="AU-NSW">Australia NSW — AWS ap-southeast-2 Sydney (AU-NSW)</option>
                 <option value="AU-VIC">Australia (Victoria)</option>
                 <option value="JP-TK">Japan (Tokyo)</option>
               </optgroup>
@@ -127,13 +129,31 @@
             <div class="label">Job name</div>
             <input id="jobName" class="input mt-1" value="nightly-training" />
           </div>
-          <div>
-            <div class="label">Duration (hours)</div>
-            <input id="durationHours" type="number" min="1" step="1" class="input mt-1" value="4" />
+          <div class="col-span-2">
+            <div class="label">Workload type</div>
+            <select id="workloadPreset" class="input mt-1">
+              <option value="training">AI model training</option>
+              <option value="llm_finetune">LLM fine-tuning</option>
+              <option value="batch_inference">Batch inference / scoring</option>
+              <option value="etl">Data pipeline / ETL</option>
+              <option value="analytics">Nightly analytics</option>
+            </select>
+            <div class="text-[11px] text-slate-500 mt-1">Sets a typical duration; you can still edit hours below.</div>
           </div>
-          <div>
-            <div class="label">Power draw (kW)</div>
-            <input id="powerKw" type="number" min="0.1" step="0.5" class="input mt-1" value="12" />
+          <div class="col-span-2">
+            <div class="label">Hardware / instance</div>
+            <select id="instancePreset" class="input mt-1">
+              <option value="__custom__">Custom (enter kW)</option>
+            </select>
+            <div class="text-[11px] text-slate-500 mt-1">Preset power is sent as <code class="text-[11px]">instance_type</code> to the API.</div>
+          </div>
+          <div id="customPowerWrap" class="col-span-2 hidden">
+            <div class="label">Custom power draw (kW)</div>
+            <input id="powerKw" type="number" min="0.1" step="0.1" class="input mt-1" value="6" />
+          </div>
+          <div class="col-span-2">
+            <div class="label">Duration (hours)</div>
+            <input id="durationHours" type="number" min="1" step="1" class="input mt-1" value="12" />
           </div>
           <div class="col-span-2">
             <div class="label">Earliest start (UTC)</div>

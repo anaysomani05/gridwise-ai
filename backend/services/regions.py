@@ -25,10 +25,31 @@ class Region:
 
 
 _REGIONS: list[Region] = [
-    Region("US-CAL-CISO", "California (CAISO)",        "United States", "strong"),
+    Region(
+        "US-CAL-CISO",
+        "California (CAISO) — Azure westus / US West (US-CAL-CISO)",
+        "United States",
+        "strong",
+    ),
     Region("US-TEX-ERCO", "Texas (ERCOT)",             "United States", "strong"),
-    Region("US-NW-PACW",  "Pacific Northwest (PACW)",  "United States", "moderate"),
-    Region("US-MIDA-PJM", "PJM (Mid-Atlantic)",        "United States", "moderate"),
+    Region(
+        "US-NW-PACW",
+        "Pacific Northwest — AWS us-west-2 Oregon (US-NW-PACW)",
+        "United States",
+        "moderate",
+    ),
+    Region(
+        "US-MIDA-PJM",
+        "PJM — AWS us-east-1 / Azure eastus Virginia (US-MIDA-PJM)",
+        "United States",
+        "moderate",
+    ),
+    Region(
+        "US-MIDW-MISO",
+        "Central US (MISO) — GCP us-central1 Iowa (US-MIDW-MISO)",
+        "United States",
+        "moderate",
+    ),
     Region("US-NE-ISNE",  "New England (ISO-NE)",      "United States", "moderate"),
     Region("US-NY-NYIS",  "New York (NYISO)",          "United States", "moderate"),
     Region("DE",          "Germany",                   "Germany",       "strong"),
@@ -39,9 +60,20 @@ _REGIONS: list[Region] = [
     Region("NO",          "Norway",                    "Norway",        "flat"),
     Region("FI",          "Finland",                   "Finland",       "moderate"),
     Region("PL",          "Poland",                    "Poland",        "moderate"),
-    Region("IN-NO",       "India (Northern Grid)",     "India",         "moderate"),
-    Region("IN-SO",       "India (Southern Grid)",     "India",         "strong"),
-    Region("AU-NSW",      "Australia (NSW)",           "Australia",     "strong"),
+    Region(
+        "IN",
+        "India (country) — AWS ap-south-1 Mumbai (IN)",
+        "India",
+        "moderate",
+    ),
+    Region("IN-NO",       "India — Northern grid (IN-NO)",     "India",         "moderate"),
+    Region("IN-SO",       "India — Southern grid (IN-SO)",     "India",         "strong"),
+    Region(
+        "AU-NSW",
+        "Australia NSW — AWS ap-southeast-2 Sydney (AU-NSW)",
+        "Australia",
+        "strong",
+    ),
     Region("AU-VIC",      "Australia (Victoria)",      "Australia",     "strong"),
     Region("JP-TK",       "Japan (Tokyo)",             "Japan",         "moderate"),
     Region("CA-ON",       "Canada (Ontario)",          "Canada",        "moderate"),

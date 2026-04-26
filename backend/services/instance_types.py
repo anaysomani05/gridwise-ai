@@ -8,6 +8,9 @@ kilowatts. They are deliberately approximations — accurate enough for a
 If the user passes `instance_type`, the optimizer overrides `power_kw` with the
 value from this table. If `instance_type` is unknown we raise; callers should
 either omit it or hit GET /instance-types first to see valid names.
+
+Dashboard-oriented `preset.*` entries are listed first; legacy `cpu.*` / `gpu.*`
+SKUs remain for API compatibility.
 """
 from __future__ import annotations
 
@@ -23,6 +26,44 @@ class InstanceType:
 
 
 _INSTANCES: list[InstanceType] = [
+    # --- User-facing presets (dashboard defaults)
+    InstanceType(
+        "preset.a100_pcie",
+        0.30,
+        "Single A100 GPU (PCIe)",
+        "gpu",
+    ),
+    InstanceType(
+        "preset.a100_sxm",
+        0.40,
+        "Single A100 GPU (SXM)",
+        "gpu",
+    ),
+    InstanceType(
+        "preset.a100_node8",
+        6.00,
+        "8× A100 node (full server)",
+        "gpu",
+    ),
+    InstanceType(
+        "preset.h100_node8",
+        10.00,
+        "8× H100 node (full server)",
+        "gpu",
+    ),
+    InstanceType(
+        "preset.cluster_multinode",
+        32.00,
+        "Multi-node training cluster",
+        "training-cluster",
+    ),
+    InstanceType(
+        "preset.cpu_node",
+        0.50,
+        "CPU-only compute node",
+        "cpu",
+    ),
+    # --- Legacy / SKU-style names (existing clients)
     InstanceType("cpu.small",        0.05, "1 vCPU general-purpose VM",                "cpu"),
     InstanceType("cpu.medium",       0.15, "4 vCPU general-purpose VM",                "cpu"),
     InstanceType("cpu.large",        0.40, "16 vCPU general-purpose VM",               "cpu"),

@@ -26,6 +26,24 @@ def test_instance_type_overrides_power_kw(client):
     assert body["request"]["power_kw"] == 12.0  # gpu.h100.x8 → 12 kW from lookup
 
 
+def test_preset_instance_types_resolve_power(client):
+    """Dashboard preset.* ids resolve to the documented kW values."""
+    for inst, expected_kw in (
+        ("preset.a100_pcie", 0.3),
+        ("preset.a100_sxm", 0.4),
+        ("preset.a100_node8", 6.0),
+        ("preset.h100_node8", 10.0),
+        ("preset.cluster_multinode", 32.0),
+        ("preset.cpu_node", 0.5),
+    ):
+        payload = _payload(power_kw=None, instance_type=inst)
+        r = client.post("/optimize", json=payload)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["request"]["instance_type"] == inst
+        assert body["request"]["power_kw"] == expected_kw
+
+
 def test_instance_type_unknown_returns_400(client):
     payload = _payload(power_kw=None, instance_type="gpu.totally-fake")
     r = client.post("/optimize", json=payload)
