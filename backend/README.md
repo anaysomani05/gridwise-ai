@@ -47,13 +47,12 @@ Request body example:
 
 ```json
 {
-  "region": "US-CAL-CISO",
+  "region": "CA-NU",
   "job_name": "nightly-training",
   "duration_hours": 4,
   "power_kw": 12,
   "start_after": "2026-04-25T18:00:00Z",
-  "deadline": "2026-04-26T08:00:00Z",
-  "optimization_mode": "carbon"
+  "deadline": "2026-04-26T08:00:00Z"
 }
 ```
 
@@ -62,7 +61,7 @@ Response body example:
 ```json
 {
   "request": {
-    "region": "US-CAL-CISO",
+    "region": "CA-NU",
     "duration_hours": 4,
     "power_kw": 12,
     "deadline": "2026-04-26T08:00:00Z"
@@ -168,7 +167,7 @@ Example internal format:
 
 ```json
 {
-  "region": "US-CAL-CISO",
+  "region": "CA-NU",
   "signal_type": "carbon_intensity",
   "unit": "gCO2eq_per_kWh",
   "points": [
@@ -250,3 +249,19 @@ Provide the `reasoning`, `baseline`, `optimized`, and `metrics` blocks so Gemma 
 ## Success criteria
 
 This part is done when `POST /optimize` reliably returns a valid baseline schedule, a lower-emissions optimized schedule when one exists, and all required metrics for the UI and explanation layer.[web:55][web:65][web:74][web:117]
+
+## Local setup (no project virtualenv)
+
+Use whatever Python 3.11+ environment you already use (system, Homebrew, pyenv, conda, etc.). Install deps from this folder—**no** `python -m venv` or checked-in `.venv` required.
+
+```bash
+cd backend
+pip install -r requirements.txt
+python app.py
+```
+
+**Homebrew Python (macOS):** if `pip` refuses with *externally-managed-environment* (PEP 668), either use `python3 -m pip install -r requirements.txt --break-system-packages`, or use `uv pip install --system -r requirements.txt`, or a tool-owned env (conda, pyenv, etc.).
+
+`app.py` starts Uvicorn and loads the FastAPI app from `main.py` (with auto-reload in dev). Equivalent: `python -m uvicorn main:app --reload --port 8000`.
+
+Open `http://127.0.0.1:8000/docs` to try `POST /optimize`.
