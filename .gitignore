@@ -1,23 +1,74 @@
-# Virtual environments
-.venv/
-**/.venv/
+# ============================================================
+# GridWise — root .gitignore
+# ============================================================
 
-# Secrets
+# Environment / secrets — NEVER commit these
 .env
+.env.local
+.env.*.local
 **/.env
+*.env
 
 # Python
 __pycache__/
-*.pyc
-.pytest_cache/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+**/.venv/
 
-# Local / generated data
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+.ipynb_checkpoints/
+
+# Node / frontend
+node_modules/
+.next/
+.nuxt/
+.output/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+\#*\#
+
+# Local / generated data (runtimes, demos)
 data/
 agents/data/
 frontend/data/
 
-# OS
-.DS_Store
-
-# Node (if used later)
-node_modules/
+# Misc
+*.log
+*.tmp
+*.bak
+*.orig
