@@ -17,7 +17,11 @@ class Settings(BaseSettings):
     electricity_maps_api_token: str | None = None
     electricity_maps_base_url: str = "https://api.electricitymaps.com/v3"
 
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5500,http://127.0.0.1:5500,"
+        "http://localhost:3000,http://127.0.0.1:3000"
+    )
 
     @property
     def cors_origins_list(self) -> list[str]:

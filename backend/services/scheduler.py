@@ -209,13 +209,16 @@ def _reasoning(
     b_avg = int(round(sum(b_vals) / len(b_vals)))
     o_avg = int(round(sum(o_vals) / len(o_vals)))
 
-    b_sort = sorted(zip(b_hours, b_vals), key=lambda z: -z[1])[:3]
-    o_sort = sorted(zip(o_hours, o_vals), key=lambda z: z[1])
+    # Show ALL hours of each window in chronological order so the two lists are
+    # symmetric and account for the full duration. Previously baseline was capped
+    # at top-3 dirtiest, which (for a 4h job) silently dropped the 4th hour and
+    # made the UI look inconsistent with `cleaner_hours_used` (which always
+    # showed every optimized hour). Averages already convey "how much cleaner".
     return ReasoningBlock(
         baseline_avg_signal=b_avg,
         optimized_avg_signal=o_avg,
-        dirtiest_hours_avoided=[_label(t) for t, _ in b_sort],
-        cleaner_hours_used=[_label(t) for t, _ in o_sort],
+        dirtiest_hours_avoided=[_label(t) for t in b_hours],
+        cleaner_hours_used=[_label(t) for t in o_hours],
         variation_hint=variation_hint,
     )
 

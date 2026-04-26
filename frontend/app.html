@@ -67,10 +67,7 @@
         <h1 class="mt-3 text-3xl md:text-4xl font-black tracking-[-0.03em]">Dashboard</h1>
         <p class="text-slate-600 mt-1">Pick a job, see the cleanest run window, and read why.</p>
       </div>
-      <div class="flex items-center gap-2">
-        <button id="loadDemoBtn" class="btn-secondary px-4 py-2 rounded-full text-sm font-semibold">Load demo scenario</button>
-        <button id="explainBtn" class="btn-secondary px-4 py-2 rounded-full text-sm font-semibold">Explain with AI</button>
-      </div>
+      <div class="flex items-center gap-2"></div>
     </div>
 
     <!-- Top row -->
@@ -84,10 +81,46 @@
         <div class="mt-4 grid grid-cols-2 gap-4">
           <div class="col-span-2">
             <div class="label">Region / grid zone</div>
+            <!--
+              Static fallback list. On page load app.js calls refreshRegions(),
+              which replaces these <optgroup>/<option>s with the live result of
+              GET {backendUrl}/regions. The static list is only used if the
+              backend is unreachable (demo mode), and every code below is a real
+              Electricity Maps zone — never invent codes here, the live API
+              rejects unknown zones with HTTP 502.
+            -->
             <select id="region" class="input mt-1">
-              <option>US-CAL-CISO</option>
-              <option>US-CA</option>
-              <option>US-AZ</option>
+              <optgroup label="United States">
+                <option value="US-CAL-CISO">California (CAISO)</option>
+                <option value="US-TEX-ERCO">Texas (ERCOT)</option>
+                <option value="US-NW-PACW">Pacific Northwest (PACW)</option>
+                <option value="US-MIDA-PJM">PJM (Mid-Atlantic)</option>
+                <option value="US-NE-ISNE">New England (ISO-NE)</option>
+                <option value="US-NY-NYIS">New York (NYISO)</option>
+              </optgroup>
+              <optgroup label="Europe">
+                <option value="DE">Germany</option>
+                <option value="FR">France</option>
+                <option value="GB">Great Britain</option>
+                <option value="ES">Spain</option>
+                <option value="SE">Sweden</option>
+                <option value="NO">Norway</option>
+                <option value="FI">Finland</option>
+                <option value="PL">Poland</option>
+              </optgroup>
+              <optgroup label="Asia &amp; Pacific">
+                <option value="IN-NO">India (Northern Grid)</option>
+                <option value="IN-SO">India (Southern Grid)</option>
+                <option value="AU-NSW">Australia (NSW)</option>
+                <option value="AU-VIC">Australia (Victoria)</option>
+                <option value="JP-TK">Japan (Tokyo)</option>
+              </optgroup>
+              <optgroup label="Americas">
+                <option value="CA-ON">Canada (Ontario)</option>
+                <option value="CA-QC">Canada (Québec)</option>
+                <option value="CA-NU">Canada (Nunavut)</option>
+                <option value="BR-CS">Brazil (Central-South)</option>
+              </optgroup>
             </select>
           </div>
           <div class="col-span-2">
@@ -96,7 +129,7 @@
           </div>
           <div>
             <div class="label">Duration (hours)</div>
-            <input id="durationHours" type="number" min="0.5" step="0.5" class="input mt-1" value="4" />
+            <input id="durationHours" type="number" min="1" step="1" class="input mt-1" value="4" />
           </div>
           <div>
             <div class="label">Power draw (kW)</div>
@@ -124,7 +157,6 @@
             Optimize schedule
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </button>
-          <button id="loadDemoInlineBtn" class="btn-secondary px-4 py-2.5 rounded-xl text-sm font-semibold">Load demo</button>
           <span id="reqStatus" class="ml-2 text-xs text-slate-500"></span>
         </div>
       </section>
@@ -210,7 +242,7 @@
           <div class="section-title">Why this schedule?</div>
           <span class="pill bg-mist text-ink2">/explain</span>
         </div>
-        <p id="explainText" class="mt-4 text-[16px] leading-relaxed text-slate-800">Click <span class="font-semibold">Explain with AI</span> to generate a plain‑English reasoning for the optimized window.</p>
+        <p id="explainText" class="mt-4 text-[16px] leading-relaxed text-slate-800">Run an optimization to see a plain‑English explanation of the chosen window.</p>
         <div id="reasoningBlock" class="mt-5 grid sm:grid-cols-2 gap-3"></div>
         <div id="audioBlock" class="mt-4 hidden">
           <a id="audioLink" class="btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold inline-flex items-center gap-2" href="#" target="_blank" rel="noopener">▶ Play audio explanation</a>
