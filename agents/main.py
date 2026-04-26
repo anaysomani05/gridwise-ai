@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GridWise AI Agent Layer",
     description=(
-        "Explains carbon-aware scheduling decisions using Gemma 4, "
-        "stores run history, and optionally generates spoken explanations via ElevenLabs."
+        "Explains carbon-aware scheduling decisions using Gemma 4 and "
+        "optionally generates spoken explanations via ElevenLabs."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -62,12 +62,6 @@ def _gemma():
     from services.gemma_service import generate_explanation
 
     return generate_explanation
-
-
-def _memory():
-    from services.memory_service import get_history, save_run
-
-    return save_run, get_history
 
 
 def _tts():
@@ -153,12 +147,6 @@ class OptimizeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SaveRunRequest(BaseModel):
-    payload: OptimizeResponse
-    explanation: str
-    user_id: Optional[str] = "default"
-
-
 class ExplainResponse(BaseModel):
     explanation_text: str
     audio_available: bool
@@ -168,15 +156,6 @@ class AudioExplainResponse(BaseModel):
     explanation_text: str
     audio_b64: Optional[str] = None
     mime_type: str = "audio/mpeg"
-
-
-class SaveRunResponse(BaseModel):
-    status: str
-    run_id: str
-
-
-class HistoryResponse(BaseModel):
-    runs: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -261,49 +240,6 @@ async def explain_with_audio(payload: OptimizeResponse):
         audio_b64=audio_b64,
         mime_type="audio/mpeg",
     )
-
-
-@app.post("/save-run", response_model=SaveRunResponse, tags=["Memory"])
-async def save_run_endpoint(body: SaveRunRequest):
-    """
-    Persist the current optimization run + explanation to memory.
-    The payload is the full OptimizeResponse so history comparisons
-    can reference exact signal values and windows.
-    """
-    save_run, _ = _memory()
-
-    try:
-        run_id = await save_run(
-            payload=body.payload.model_dump(),
-            explanation=body.explanation,
-            user_id=body.user_id or "default",
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Memory service error: {exc}"
-        ) from exc
-
-    return SaveRunResponse(status="saved", run_id=run_id)
-
-
-@app.get("/history", response_model=HistoryResponse, tags=["Memory"])
-async def history(user_id: str = "default"):
-    """
-    Return previous optimization runs for a given user.
-
-    The frontend uses this for the history panel and comparison messages
-    such as "Compared to your last run, this schedule saved 4% more CO₂."
-    """
-    _, get_history = _memory()
-
-    try:
-        runs = await get_history(user_id=user_id)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Memory service error: {exc}"
-        ) from exc
-
-    return HistoryResponse(runs=runs)
 
 
 # ---------------------------------------------------------------------------

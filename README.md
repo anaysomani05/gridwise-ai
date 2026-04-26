@@ -1,39 +1,35 @@
-# GridWise AI: Carbon-Aware Compute Scheduler
+# GridWise AI
 
-**Idea:**  
-An AI-powered scheduler that shifts flexible AI and data-center workloads into lower-carbon hours using real grid emissions data and optimization, cutting compute emissions without missing SLAs.
+Carbon-aware scheduling for flexible compute: given region, duration, power, earliest start, and deadline, GridWise picks the lowest-emission contiguous window before the deadline and compares it to “run as soon as possible.”
 
-## What this project is
+## Repo layout
 
-GridWise AI is a carbon-aware scheduling platform for flexible compute jobs. Given a workload’s region, duration, power draw, and deadline, it finds the cleanest feasible time window to run that job and compares it against the baseline “run now” option.
+| Path | Role |
+|------|------|
+| `backend/` | Optimizer API — grid signal, baseline vs optimized windows, metrics (`POST /optimize`). |
+| `frontend/` | Static dashboard + marketing page — form, chart, KPIs, Gemma explanation (optional audio). |
+| `agents/` | FastAPI layer — `POST /explain` and optional `POST /explain/audio` (Gemma + ElevenLabs). |
 
-## Why we are building this
+Each folder has its own README with setup and API notes.
 
-AI buildout is increasing demand on the grid, and data centers are becoming a meaningful driver of electricity growth. In 2025, global electricity demand grew 3%, with EVs and data centers among the fastest-growing contributors, and data centers accounted for around half of total electricity demand growth in the U.S.
+## Quick start
 
-At the same time, grid emissions are not constant throughout the day. Hourly carbon intensity can change significantly depending on generation mix, imports, and system conditions, which means the timing of a workload directly affects its emissions footprint.
+```bash
+# Terminal 1 — optimizer (port 8000)
+cd backend && pip install -r requirements.txt && python app.py
 
-That creates a clear opportunity: **same compute, smarter timing**. Instead of changing the job itself, GridWise AI changes *when* it runs so flexible workloads align with lower-carbon hours while still meeting deadlines.
+# Terminal 2 — explanations (port 8001)
+cd agents && pip install -r requirements.txt && python main.py
 
-## Problem
+# Terminal 3 — UI
+cd frontend && python3 -m http.server 5500
+# Open http://localhost:5500/app.html — use “Connect APIs” if not on defaults.
+```
 
-Many AI and batch-compute workloads are flexible, but they still run during fossil-heavy peak periods by default. That adds avoidable emissions and often increases pressure on already-constrained evening demand windows.
+**Env:** backend needs Electricity Maps (and/or WattTime) keys in `backend/.env`; agents need `GEMINI_API_KEY` for explanations. See each service README.
 
-## Solution
+## What ships today
 
-GridWise AI takes a workload input, pulls real hourly grid-carbon data, and uses optimization to schedule that workload in the lowest-carbon feasible window before its deadline. It then shows the user the recommended schedule, baseline vs optimized emissions, percent reduction, and a short explanation of why the new schedule is better.
-
-## What we built
-
-- Input form for region, duration, kWh / power draw, and deadline
-- Real grid-carbon data integration using Electricity Maps or WattTime
-- Optimization engine that compares baseline vs best feasible schedule
-- Output showing recommended window, kg CO2 avoided, and % emissions reduction
-- Lightweight AI explanation layer to summarize the decision in plain language
-
-## Motivation
-
-This project is based on a simple idea:  
-**more AI compute on the grid can mean more emissions, but carbon-aware scheduling can reduce those emissions without reducing compute.**
-
-The broader goal is to make energy-aware software practical. Instead of asking operators to manually reason about grid behavior, GridWise AI turns live carbon signals into an actionable scheduling recommendation.
+- Hourly carbon signal → contiguous-window optimization vs ASAP baseline  
+- Dashboard: timeline, savings KPIs, “why this schedule?” (structured times + Gemma prose; optional TTS)  
+- No persisted run history — each optimize/explain is stateless aside from browser `localStorage` for API URLs

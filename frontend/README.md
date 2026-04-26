@@ -1,44 +1,29 @@
-# GridWise AI — Frontend
+# GridWise frontend
 
-## What’s in this folder
+Static site: HTML, Tailwind (CDN), Chart.js, vanilla JS — no bundler.
 
-Static, no-build site (HTML + Tailwind via CDN + Chart.js):
+## Files
 
-| File | Role |
-|------|------|
-| `index.html` | Marketing landing (hero, problem/solution, how it works) |
-| `app.html` | Dashboard (form, recommendation, chart, KPIs, explanation, history) |
-| `app.js` | Logic: mock “optimize” from inputs, optional live `POST /optimize` and `POST /explain` |
+| File | Purpose |
+|------|---------|
+| `index.html` | Landing page |
+| `app.html` | Dashboard |
+| `app.js` | Mock optimize when APIs are unset; else `POST /optimize`, `POST /explain`, optional audio |
 
-## Run locally
+## Run
 
 ```bash
-cd frontend
-python3 -m http.server 5500
-# open http://localhost:5500/index.html
+cd frontend && python3 -m http.server 5500
 ```
 
-For API calls from the page without file:// CORS issues, use any static server (port above is just an example).
+Open `http://localhost:5500/app.html` (or `index.html`). Use a local server so `fetch` to the backend/agent is not blocked as `file://`.
 
-## Connect to backend and agent
+## Connect APIs
 
-In `app.html`, open **Connect APIs** and set:
+In **Connect APIs**: set backend URL (`POST …/optimize`) and agent URL (`POST …/explain`). Empty = built-in demo. Settings persist in `localStorage`.
 
-- **Backend base URL** → `POST {url}/optimize`
-- **Agent base URL** → `POST {url}/explain`
+Earliest start and deadline use `datetime-local` inputs; the client sends ISO UTC (`…Z`) to the backend.
 
-Leave blank to use the built-in demo. Settings are stored in `localStorage`.
+## UX (one glance)
 
----
-
-## Product / UX spec (reference)
-
-**Goal:** make the scheduling decision obvious in a few seconds: which job, baseline vs optimized window, and kg CO₂ avoided.
-
-**Principles:** chart-first, not chat-first; minimal text above the fold; strong “result” card; neutral, climate-tech look (teal = cleaner, orange/red = baseline / dirtier).
-
-**Dashboard sections (conceptually):** header, job form + recommendation card, carbon timeline with baseline/optimized overlays, KPI row, AI explanation (Gemma) + optional ElevenLabs audio, history / “vs last run” if memory is wired.
-
-**Integration:** prefer backend / agent numbers for emissions; the current static demo can compute a fallback when no backend is connected.
-
-**Demo flow:** load demo → optimize → see chart + metrics → explain → (optional) second run to compare.
+Recommendation card (windows + KPIs) → chart (baseline vs optimized) → impact row → “Why this schedule?” (original/optimised times, Gemma text, two evidence cards, optional ElevenLabs link when the agent exposes audio).

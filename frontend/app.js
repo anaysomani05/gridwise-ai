@@ -6,17 +6,12 @@
 //                                     -> { explanation_text, audio_available }
 //   POST {agentUrl}/explain/audio     body = OptimizeResponse
 //                                     -> { explanation_text, audio_b64, mime_type }
-//   POST {agentUrl}/save-run          body = { payload: OptimizeResponse, explanation, user_id? }
-//                                     -> { status, run_id }
-//   GET  {agentUrl}/history?user_id=  -> { runs: [...] }
 //
 // Defaults: if no settings are configured we point at localhost:8000 / :8001
 // so the demo "just works" when both servers are running locally. Setting either
 // URL to an empty string in the Connect APIs drawer falls back to mock data.
 
 const STORE_KEY = "gridwise.settings.v1";
-const HISTORY_KEY = "gridwise.history.v1";
-const USER_ID = "default";
 
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 const DEFAULT_AGENT_URL = "http://localhost:8001";
@@ -40,11 +35,6 @@ function loadSettings() {
   return s;
 }
 function saveSettings(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
-  catch { return []; }
-}
-function saveHistory(h) { localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 5))); }
 
 function fmtIso(ts) {
   const d = new Date(ts);
@@ -55,7 +45,65 @@ function fmtIso(ts) {
 }
 function fmtWindow(a, b) { return `${fmtIso(a)} – ${fmtIso(b)}`; }
 
+// Render an ISO start/end pair as a compact hour window like "18:00 – 23:00 UTC".
+// We deliberately source these strings from opt.baseline / opt.optimized rather
+// than reasoning.dirtiest_hours_avoided / reasoning.cleaner_hours_used, so the
+// two evidence cards are guaranteed to agree with the recommendation card above
+// (single source of truth: the same fields drive both).
+function windowToHourRange(startIso, endIso) {
+  if (!startIso || !endIso) return "—";
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "—";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(s.getUTCHours())}:00 – ${pad(e.getUTCHours())}:00 UTC`;
+}
+
+// Human-friendly window string used in the "Why this schedule?" header. Matches
+// the format the Gemma prompt used to produce in prose ("Sat Apr 25, 7:00 PM –
+// 11:00 PM UTC" for same-day, "Sat Apr 25, 11:00 PM → Sun Apr 26, 4:00 AM UTC"
+// when the window crosses midnight) so the dashboard reads consistently with
+// any cached/older explanation text.
+function formatHumanWindow(startIso, endIso) {
+  if (!startIso || !endIso) return "—";
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "—";
+
+  const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const fmtTime = (d) => {
+    const h24 = d.getUTCHours();
+    const h12 = h24 % 12 || 12;
+    const ampm = h24 < 12 ? "AM" : "PM";
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${h12}:${mm} ${ampm}`;
+  };
+  const fmtDate = (d) => `${DAY[d.getUTCDay()]} ${MON[d.getUTCMonth()]} ${d.getUTCDate()}`;
+
+  const sameDay =
+    s.getUTCFullYear() === e.getUTCFullYear() &&
+    s.getUTCMonth() === e.getUTCMonth() &&
+    s.getUTCDate() === e.getUTCDate();
+
+  if (sameDay) return `${fmtDate(s)}, ${fmtTime(s)} – ${fmtTime(e)} UTC`;
+  return `${fmtDate(s)}, ${fmtTime(s)} → ${fmtDate(e)}, ${fmtTime(e)} UTC`;
+}
+
 function setText(id, val) { const el = $(id); if (el) el.textContent = val; }
+
+// The two date/time inputs are <input type="datetime-local">, which yields a
+// naive string like "2026-04-25T18:00" with no timezone. We treat what the
+// user picks as already-UTC (matching the field labels), so we just append
+// seconds + "Z" to produce the ISO-8601 UTC string the backend expects.
+function localToUtcIso(localStr) {
+  if (!localStr) return "";
+  // Tolerate values that already include seconds or a "Z" suffix.
+  if (/Z$/.test(localStr)) return localStr;
+  const withSeconds = localStr.length === 16 ? `${localStr}:00` : localStr;
+  return `${withSeconds}Z`;
+}
 
 function updateModeBadge() {
   const s = loadSettings();
@@ -151,7 +199,7 @@ function renderOptimize(opt) {
 
   setText("optimizedWindow", o.start && o.end ? fmtWindow(o.start, o.end) : "—");
   setText("baselineWindow", b.start && b.end ? fmtWindow(b.start, b.end) : "—");
-  setText("startAfterEcho", $("startAfter").value || (opt.request && opt.request.start_after) || "—");
+  setText("startAfterEcho", localToUtcIso($("startAfter").value) || (opt.request && opt.request.start_after) || "—");
 
   setText("co2Saved", (m.co2_saved_kg ?? 0).toFixed(1));
   setText("reductionPct", (m.percent_reduction ?? 0).toFixed(1));
@@ -171,31 +219,89 @@ function renderOptimize(opt) {
   }
 
   renderChart(opt);
+  renderTimeShift(opt);
+  renderReasoningBoxes(opt);
+
+  // Reset the explanation paragraph immediately so the previous run's text
+  // doesn't sit next to the new chart/KPIs while we wait for /explain. The
+  // onExplain() handler will overwrite this with the loading state and then
+  // the real Gemma output.
+  setText("explainText", "Generating explanation…");
 
   $("rawJson").textContent = JSON.stringify(opt, null, 2);
+}
+
+// Two-row "Original time / Optimised time" header that sits above the Gemma
+// prose. Sourced from opt.baseline / opt.optimized so it always agrees with
+// the recommendation card and updates the instant /optimize returns — no
+// waiting on the agent round-trip. When baseline == optimized we collapse the
+// second row into a short "Same as original" hint instead of repeating the
+// window, because seeing the identical line twice always reads as a bug.
+function renderTimeShift(opt) {
+  const block = $("timeShift");
+  if (!block) return;
+  const b = opt.baseline || {};
+  const o = opt.optimized || {};
+  const sameWindow = b.start === o.start && b.end === o.end;
+
+  const originalStr = formatHumanWindow(b.start, b.end);
+  const optimisedStr = sameWindow
+    ? "Same as original — no cleaner window in this range"
+    : formatHumanWindow(o.start, o.end);
+
+  const labelCls = "text-ink2 font-medium";
+  const valueCls = "text-slate-800";
+  const optimisedValueCls = sameWindow ? "text-slate-500 italic" : valueCls;
+
+  block.innerHTML =
+    `<div class="${labelCls}">Original time</div>` +
+    `<div class="${valueCls}">${originalStr}</div>` +
+    `<div class="${labelCls}">Optimised time</div>` +
+    `<div class="${optimisedValueCls}">${optimisedStr}</div>`;
+}
+
+// The two evidence cards under "Why this schedule?". Driven from the same
+// baseline/optimized fields the recommendation card uses so they cannot drift
+// out of sync. When the optimizer can't beat ASAP (b == o), both cards show
+// the same window — that's the truthful signal that no shift was available.
+function renderReasoningBoxes(opt) {
+  const block = $("reasoningBlock");
+  if (!block) return;
+  const b = opt.baseline || {};
+  const o = opt.optimized || {};
+  const sameWindow = b.start === o.start && b.end === o.end;
+
+  const items = [
+    {
+      k: "Dirtiest hours avoided",
+      v: windowToHourRange(b.start, b.end),
+      hint: sameWindow ? "no cleaner window available" : null,
+    },
+    {
+      k: "Cleaner hours used",
+      v: windowToHourRange(o.start, o.end),
+      hint: sameWindow ? "same as baseline — no shift" : null,
+    },
+  ];
+
+  block.innerHTML = "";
+  for (const it of items) {
+    const card = document.createElement("div");
+    card.className = "kpi";
+    const hintHtml = it.hint
+      ? `<div class="mt-1 text-[11px] text-slate-500">${it.hint}</div>`
+      : "";
+    card.innerHTML =
+      `<div class="label">${it.k}</div>` +
+      `<div class="mt-1 text-sm font-semibold tracking-tight">${it.v}</div>` +
+      hintHtml;
+    block.appendChild(card);
+  }
 }
 
 function renderExplain(exp) {
   const text = (exp && (exp.text_explanation || exp.text)) || "No explanation available.";
   setText("explainText", text);
-
-  const r = (CURRENT_OPTIMIZE && CURRENT_OPTIMIZE.reasoning) || null;
-  const block = $("reasoningBlock");
-  block.innerHTML = "";
-  if (r) {
-    const items = [
-      { k: "Baseline avg", v: `${r.baseline_avg_signal} gCO₂/kWh` },
-      { k: "Optimized avg", v: `${r.optimized_avg_signal} gCO₂/kWh` },
-      { k: "Dirtiest hours avoided", v: (r.dirtiest_hours_avoided || []).join(", ") || "—" },
-      { k: "Cleaner hours used", v: (r.cleaner_hours_used || []).join(", ") || "—" },
-    ];
-    for (const it of items) {
-      const card = document.createElement("div");
-      card.className = "kpi";
-      card.innerHTML = `<div class="label">${it.k}</div><div class="mt-1 text-sm font-semibold tracking-tight">${it.v}</div>`;
-      block.appendChild(card);
-    }
-  }
 
   const audio = exp && exp.audio;
   const audioBlock = $("audioBlock");
@@ -208,28 +314,6 @@ function renderExplain(exp) {
   }
 }
 
-function renderHistory() {
-  const list = $("historyList");
-  if (!list) return;
-  const h = loadHistory();
-  if (!h.length) {
-    list.innerHTML = `<li class="text-slate-500">Run Optimize to populate history.</li>`;
-    return;
-  }
-  list.innerHTML = h.slice(0, 4).map((row) => `
-    <li class="flex items-center justify-between border-b border-black/5 pb-3 last:border-none last:pb-0">
-      <div>
-        <div class="font-semibold tracking-tight">${row.region}</div>
-        <div class="text-xs text-slate-500">${new Date(row.ts).toLocaleString()}</div>
-      </div>
-      <div class="text-right">
-        <div class="text-sm font-semibold text-teal-700">${(row.percent_reduction ?? 0).toFixed(1)}%</div>
-        <div class="text-xs text-slate-500">${(row.co2_saved_kg ?? 0).toFixed(1)} kg saved</div>
-      </div>
-    </li>
-  `).join("");
-}
-
 // ---- API calls
 // Matches backend/schemas.py::OptimizeRequest. duration_hours is an int.
 function buildPayload() {
@@ -238,8 +322,8 @@ function buildPayload() {
     job_name: $("jobName").value || "job",
     duration_hours: Math.max(1, Math.round(Number($("durationHours").value) || 1)),
     power_kw: Number($("powerKw").value) || 1,
-    start_after: $("startAfter").value,
-    deadline: $("deadline").value,
+    start_after: localToUtcIso($("startAfter").value),
+    deadline: localToUtcIso($("deadline").value),
   };
 }
 
@@ -399,29 +483,6 @@ async function callExplain(opt) {
   }
 }
 
-// Persist the run + explanation to the agent's memory layer (Backboard-backed).
-async function callSaveRun(opt, explanationText) {
-  const s = loadSettings();
-  if (!s.agentUrl) return null;
-  try {
-    const url = `${s.agentUrl.replace(/\/$/, "")}/save-run`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        payload: opt,
-        explanation: explanationText || "",
-        user_id: USER_ID,
-      }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (e) {
-    console.warn("save-run failed", e);
-    return null;
-  }
-}
-
 // Pull the canonical zone list from the backend so the region dropdown stays in
 // sync with what the optimizer actually supports. Returns null on any failure
 // (no backend configured, network error, non-2xx) — the caller leaves the
@@ -476,47 +537,16 @@ async function refreshRegions() {
   }
 }
 
-// Pull persistent run history from the agent layer; falls back to localStorage.
-async function callHistory() {
-  const s = loadSettings();
-  if (!s.agentUrl) return null;
-  try {
-    const url = `${s.agentUrl.replace(/\/$/, "")}/history?user_id=${encodeURIComponent(USER_ID)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return Array.isArray(data.runs) ? data.runs : [];
-  } catch (e) {
-    console.warn("history failed", e);
-    return null;
-  }
-}
-
 // ---- handlers
 // Re-entry guard. Optimize auto-chains into Explain, so if the user spam-clicks
-// Optimize we don't want to fire two parallel /explain + /save-run round-trips
-// at the agent (Backboard would also see duplicates). The flag is reset in the
-// onExplain() finally block so a failed call doesn't lock the UI.
+// Optimize we don't want to fire two parallel /explain round-trips at the
+// agent. The flag is reset in the onExplain() finally block so a failed call
+// doesn't lock the UI.
 let EXPLAIN_IN_FLIGHT = false;
 
 async function onOptimize() {
   const opt = await callOptimize();
   renderOptimize(opt);
-
-  // Always update the local localStorage cache so demo mode still has history.
-  const region = (opt.request && opt.request.region) || $("region").value;
-  const m = opt.metrics || {};
-  const h = loadHistory();
-  h.unshift({
-    ts: new Date().toISOString(),
-    region,
-    co2_saved_kg: m.co2_saved_kg,
-    percent_reduction: m.percent_reduction,
-  });
-  saveHistory(h);
-
-  // Prefer the agent's persistent history if it's reachable.
-  await refreshHistory();
 
   // Auto-explain: as soon as the optimizer returns, kick off the Gemma
   // explanation so the user sees the "why" without a second click. There is
@@ -536,44 +566,9 @@ async function onExplain() {
   try {
     const exp = await callExplain(CURRENT_OPTIMIZE);
     renderExplain(exp);
-
-    // Persist to memory (no-op if agent isn't configured / reachable).
-    await callSaveRun(CURRENT_OPTIMIZE, exp.text_explanation || "");
-    await refreshHistory();
   } finally {
     EXPLAIN_IN_FLIGHT = false;
   }
-}
-
-// Try the agent's /history first; fall back to local cache. Keeps the panel useful
-// in demo mode but lets the live agent layer take over once it is up.
-async function refreshHistory() {
-  const remote = await callHistory();
-  if (remote && remote.length) {
-    const list = $("historyList");
-    if (!list) return;
-    list.innerHTML = remote.slice(0, 4).map((row) => {
-      const pct = (row.percent_reduction ?? 0).toFixed(1);
-      const kg  = (row.co2_saved_kg ?? 0).toFixed(1);
-      const when = row.saved_at ? new Date(row.saved_at).toLocaleString() : "";
-      const note = row.comparison_message ? `<div class="text-xs text-slate-500 mt-1">${row.comparison_message}</div>` : "";
-      return `
-        <li class="flex items-start justify-between border-b border-black/5 pb-3 last:border-none last:pb-0">
-          <div class="pr-3">
-            <div class="font-semibold tracking-tight">${row.region || "—"}</div>
-            <div class="text-xs text-slate-500">${when}</div>
-            ${note}
-          </div>
-          <div class="text-right shrink-0">
-            <div class="text-sm font-semibold text-teal-700">${pct}%</div>
-            <div class="text-xs text-slate-500">${kg} kg saved</div>
-          </div>
-        </li>
-      `;
-    }).join("");
-    return;
-  }
-  renderHistory(); // localStorage fallback
 }
 
 function openDrawer() {
@@ -618,6 +613,4 @@ document.addEventListener("DOMContentLoaded", () => {
   // Populate the region dropdown from /regions; keeps frontend and backend in sync.
   // Falls back silently to the hardcoded HTML <option>s if the backend is offline.
   refreshRegions();
-  // Try the agent's persistent history first; falls back to localStorage if not reachable.
-  refreshHistory();
 });
