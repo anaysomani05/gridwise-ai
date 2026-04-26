@@ -1,0 +1,23 @@
+# Virtual environments
+.venv/
+**/.venv/
+
+# Secrets
+.env
+**/.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local / generated data
+data/
+agents/data/
+frontend/data/
+
+# OS
+.DS_Store
+
+# Node (if used later)
+node_modules/

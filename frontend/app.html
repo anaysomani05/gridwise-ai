@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GridWise AI — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+            serif: ['Instrument Serif', 'ui-serif', 'Georgia', 'serif'],
+          },
+          colors: { ink: '#0b1220', ink2: '#1f2937', mist: '#f6f7f9' },
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; -webkit-font-smoothing: antialiased; background:#fafafa; color:#0b1220; }
+    .card { background:#ffffff; border:1px solid rgba(2,6,23,0.08); border-radius:18px; }
+    .kpi { background:#ffffff; border:1px solid rgba(2,6,23,0.08); border-radius:14px; padding:16px; }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:9999px; font-size:13px; font-weight:600; }
+    .badge-dot { width:6px; height:6px; border-radius:9999px; background:#14b8a6; box-shadow:0 0 0 4px rgba(20,184,166,0.18); }
+    .nav-link { color:#475569; font-size:14px; font-weight:500; }
+    .btn-primary { background:#0b1220; color:#ffffff; }
+    .btn-primary:hover { background:#000; }
+    .btn-secondary { background:#ffffff; color:#0b1220; border:1px solid rgba(2,6,23,0.1); }
+    .btn-secondary:hover { border-color:rgba(2,6,23,0.2); }
+    .input { background:#ffffff; border:1px solid rgba(2,6,23,0.1); border-radius:12px; padding:10px 12px; font-size:14px; color:#0b1220; width:100%; outline:none; }
+    .input:focus { border-color:#0b1220; box-shadow:0 0 0 4px rgba(11,18,32,0.06); }
+    .label { font-size:12px; color:#64748b; font-weight:600; }
+    .section-title { font-size:12px; font-weight:700; letter-spacing:0.18em; color:#64748b; text-transform:uppercase; }
+  </style>
+</head>
+<body>
+  <!-- NAV -->
+  <header class="sticky top-0 z-30 backdrop-blur bg-white/80 border-b border-black/5">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="./index.html" class="flex items-center gap-2">
+        <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-ink text-white text-[13px] font-black">G</span>
+        <span class="font-bold tracking-tight">GridWise AI</span>
+        <span class="ml-2 pill bg-mist text-ink2"><span class="badge-dot"></span><span id="modeBadge">Demo</span></span>
+      </a>
+      <nav class="hidden md:flex items-center gap-7">
+        <a class="nav-link" href="./index.html">Home</a>
+        <a class="nav-link" href="./index.html#how">How it works</a>
+        <a class="nav-link" href="./index.html#impact">Impact</a>
+      </nav>
+      <div class="flex items-center gap-2">
+        <button id="settingsBtn" class="btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold">Connect APIs</button>
+        <button id="optimizeTopBtn" class="btn-primary px-3.5 py-2 rounded-full text-sm font-semibold">Optimize</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8">
+    <!-- Header band -->
+    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+      <div>
+        <span class="pill bg-white border border-black/5 text-ink2"><span class="badge-dot"></span>Carbon‑aware compute scheduling</span>
+        <h1 class="mt-3 text-3xl md:text-4xl font-black tracking-[-0.03em]">Dashboard</h1>
+        <p class="text-slate-600 mt-1">Pick a job, see the cleanest run window, and read why.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="loadDemoBtn" class="btn-secondary px-4 py-2 rounded-full text-sm font-semibold">Load demo scenario</button>
+        <button id="explainBtn" class="btn-secondary px-4 py-2 rounded-full text-sm font-semibold">Explain with AI</button>
+      </div>
+    </div>
+
+    <!-- Top row -->
+    <div class="mt-6 grid lg:grid-cols-2 gap-6">
+      <!-- Job form -->
+      <section class="card p-6">
+        <div class="flex items-center justify-between">
+          <div class="section-title">New job</div>
+          <span class="pill bg-mist text-ink2">/optimize</span>
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-4">
+          <div class="col-span-2">
+            <div class="label">Region / grid zone</div>
+            <select id="region" class="input mt-1">
+              <option>US-CAL-CISO</option>
+              <option>US-CA</option>
+              <option>US-AZ</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <div class="label">Job name</div>
+            <input id="jobName" class="input mt-1" value="nightly-training" />
+          </div>
+          <div>
+            <div class="label">Duration (hours)</div>
+            <input id="durationHours" type="number" min="0.5" step="0.5" class="input mt-1" value="4" />
+          </div>
+          <div>
+            <div class="label">Power draw (kW)</div>
+            <input id="powerKw" type="number" min="0.1" step="0.5" class="input mt-1" value="12" />
+          </div>
+          <div class="col-span-2">
+            <div class="label">Earliest start (ISO UTC)</div>
+            <input id="startAfter" class="input mt-1" value="2026-04-25T18:00:00Z" />
+          </div>
+          <div class="col-span-2">
+            <div class="label">Deadline (ISO UTC)</div>
+            <input id="deadline" class="input mt-1" value="2026-04-26T08:00:00Z" />
+          </div>
+          <div class="col-span-2">
+            <div class="label">Optimization mode</div>
+            <select id="mode" class="input mt-1">
+              <option value="carbon">Carbon</option>
+              <option value="balanced">Balanced</option>
+              <option value="cost">Cost</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-5 flex items-center gap-2">
+          <button id="optimizeBtn" class="btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-2">
+            Optimize schedule
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+          <button id="loadDemoInlineBtn" class="btn-secondary px-4 py-2.5 rounded-xl text-sm font-semibold">Load demo</button>
+          <span id="reqStatus" class="ml-2 text-xs text-slate-500"></span>
+        </div>
+      </section>
+
+      <!-- Recommendation -->
+      <section class="card p-6 relative overflow-hidden">
+        <div class="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-teal-200/40 blur-3xl"></div>
+        <div class="relative">
+          <div class="flex items-center justify-between">
+            <div class="section-title">Recommendation</div>
+            <span id="metDeadline" class="pill bg-teal-50 text-teal-700">Deadline met</span>
+          </div>
+          <div class="mt-4 grid grid-cols-2 gap-4">
+            <div>
+              <div class="label">Optimized window</div>
+              <div id="optimizedWindow" class="mt-1 text-xl font-bold tracking-tight">—</div>
+              <div class="text-slate-500 text-xs mt-1">cleaner contiguous window before deadline</div>
+            </div>
+            <div>
+              <div class="label">Baseline (run ASAP)</div>
+              <div id="baselineWindow" class="mt-1 text-xl font-bold tracking-tight">—</div>
+              <div class="text-slate-500 text-xs mt-1">starts at <code id="startAfterEcho">…</code></div>
+            </div>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-3">
+            <div class="kpi">
+              <div class="label">CO₂ saved</div>
+              <div class="mt-1 text-2xl font-bold tracking-tight"><span id="co2Saved">—</span> <span class="text-base text-slate-500 font-semibold">kg</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Reduction</div>
+              <div class="mt-1 text-2xl font-bold tracking-tight text-teal-700"><span id="reductionPct">—</span>%</div>
+            </div>
+            <div class="kpi">
+              <div class="label">Provider</div>
+              <div class="mt-1 text-base font-semibold tracking-tight"><span id="providerName">—</span></div>
+              <div class="text-xs text-slate-500"><span id="signalType">—</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Chart -->
+    <section class="mt-6 card p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="section-title">Carbon timeline</div>
+          <div class="text-sm text-slate-500 mt-1">gCO₂e per kWh, hourly</div>
+        </div>
+        <div class="flex items-center gap-4 text-[12px] text-slate-500">
+          <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-orange-400/80"></span>Baseline window</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-teal-500/80"></span>Optimized window</span>
+        </div>
+      </div>
+      <div class="mt-4 h-[340px]"><canvas id="mainChart"></canvas></div>
+    </section>
+
+    <!-- Impact -->
+    <section class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="kpi">
+        <div class="label">Baseline emissions</div>
+        <div class="mt-1 text-2xl font-bold tracking-tight"><span id="baselineKg">—</span> <span class="text-base text-slate-500 font-semibold">kg</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Optimized emissions</div>
+        <div class="mt-1 text-2xl font-bold tracking-tight"><span id="optimizedKg">—</span> <span class="text-base text-slate-500 font-semibold">kg</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">CO₂ avoided</div>
+        <div class="mt-1 text-2xl font-bold tracking-tight"><span id="kgAvoided">—</span> <span class="text-base text-slate-500 font-semibold">kg</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Emissions reduction</div>
+        <div class="mt-1 text-2xl font-bold tracking-tight text-teal-700"><span id="pctReduction">—</span>%</div>
+      </div>
+    </section>
+
+    <!-- Bottom row -->
+    <div class="mt-6 grid lg:grid-cols-3 gap-6">
+      <section class="card p-6 lg:col-span-2">
+        <div class="flex items-center justify-between">
+          <div class="section-title">Why this schedule?</div>
+          <span class="pill bg-mist text-ink2">/explain</span>
+        </div>
+        <p id="explainText" class="mt-4 text-[16px] leading-relaxed text-slate-800">Click <span class="font-semibold">Explain with AI</span> to generate a plain‑English reasoning for the optimized window.</p>
+        <div id="reasoningBlock" class="mt-5 grid sm:grid-cols-2 gap-3"></div>
+        <div id="audioBlock" class="mt-4 hidden">
+          <a id="audioLink" class="btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold inline-flex items-center gap-2" href="#" target="_blank" rel="noopener">▶ Play audio explanation</a>
+        </div>
+      </section>
+
+      <section class="card p-6">
+        <div class="flex items-center justify-between">
+          <div class="section-title">Past optimizations</div>
+          <span class="pill bg-mist text-ink2">memory</span>
+        </div>
+        <ul id="historyList" class="mt-4 space-y-3 text-sm">
+          <li class="text-slate-500">Run Optimize to populate history.</li>
+        </ul>
+      </section>
+    </div>
+
+    <details class="mt-8">
+      <summary class="text-xs text-slate-500 cursor-pointer">Debug · current optimize JSON</summary>
+      <pre id="rawJson" class="mt-2 p-4 rounded-xl bg-white border border-black/5 text-[12px] overflow-auto max-h-[420px]"></pre>
+    </details>
+  </main>
+
+  <!-- Settings drawer -->
+  <div id="drawer" class="fixed inset-0 z-40 hidden">
+    <div id="drawerBackdrop" class="absolute inset-0 bg-black/30"></div>
+    <aside class="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-black/10 p-6 overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold tracking-tight">Connect APIs</h3>
+        <button id="closeDrawer" class="text-slate-500 hover:text-ink">✕</button>
+      </div>
+      <p class="text-sm text-slate-600 mt-2">Leave blank to use demo data.</p>
+      <div class="mt-5 space-y-4">
+        <div>
+          <div class="label">Backend base URL</div>
+          <input id="backendUrl" class="input mt-1" placeholder="http://localhost:8000" />
+          <div class="text-[12px] text-slate-500 mt-1">Calls <code>POST {url}/optimize</code></div>
+        </div>
+        <div>
+          <div class="label">Agent base URL</div>
+          <input id="agentUrl" class="input mt-1" placeholder="http://localhost:8001" />
+          <div class="text-[12px] text-slate-500 mt-1">Calls <code>POST {url}/explain</code></div>
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input id="includeAudio" type="checkbox" />
+          Include audio explanation (ElevenLabs)
+        </label>
+        <button id="saveSettings" class="w-full btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold">Save</button>
+        <button id="resetSettings" class="w-full btn-secondary px-4 py-2.5 rounded-xl text-sm font-semibold">Use demo data</button>
+      </div>
+    </aside>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

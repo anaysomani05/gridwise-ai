@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GridWise AI — Carbon-aware compute scheduling</title>
+  <meta name="description" content="GridWise AI shifts flexible AI workloads into cleaner grid hours using real carbon-intensity signals." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','sans-serif'],
+            serif: ['Instrument Serif','ui-serif','Georgia','serif'],
+          },
+          colors: { ink: '#0b1220', ink2: '#1f2937', mist: '#f6f7f9' },
+          boxShadow: {
+            soft: '0 1px 0 rgba(2,6,23,0.04), 0 24px 48px -16px rgba(2,6,23,0.18)',
+            ring: '0 0 0 1px rgba(2,6,23,0.06), 0 8px 24px rgba(2,6,23,0.06)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html, body { background:#ffffff; color:#0b1220; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    .hero-bg {
+      background:
+        radial-gradient(1200px 600px at 15% -10%, rgba(20,184,166,0.18), transparent 60%),
+        radial-gradient(900px 500px at 85% -10%, rgba(59,130,246,0.12), transparent 55%),
+        linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+    }
+    .grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(2,6,23,0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(2,6,23,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+    .glow { box-shadow: 0 1px 0 rgba(2,6,23,0.04), 0 30px 60px -20px rgba(2,6,23,0.25); }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:9999px; font-size:13px; font-weight:600; }
+    .badge-dot { width:6px; height:6px; border-radius:9999px; background:#14b8a6; box-shadow:0 0 0 4px rgba(20,184,166,0.18); }
+    .nav-link { color:#475569; font-size:14px; font-weight:500; }
+    .nav-link:hover { color:#0b1220; }
+    .btn-primary { background:#0b1220; color:#ffffff; }
+    .btn-primary:hover { background:#000000; }
+    .btn-secondary { background:#ffffff; color:#0b1220; border:1px solid rgba(2,6,23,0.1); }
+    .btn-secondary:hover { border-color:rgba(2,6,23,0.2); }
+    .card { background:#ffffff; border:1px solid rgba(2,6,23,0.08); border-radius:18px; }
+    .kpi-card { background:#ffffff; border:1px solid rgba(2,6,23,0.08); border-radius:14px; padding:16px; }
+    .marquee { -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
+    .scroll { animation: scroll 30s linear infinite; }
+    @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .check { width:18px; height:18px; border-radius:9999px; background:rgba(20,184,166,0.15); color:#0f766e; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+  </style>
+</head>
+<body class="text-ink">
+
+  <!-- NAV -->
+  <header class="sticky top-0 z-30 backdrop-blur bg-white/70 border-b border-black/5">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="./index.html" class="flex items-center gap-2">
+        <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-ink text-white text-[13px] font-black">G</span>
+        <span class="font-bold tracking-tight">GridWise AI</span>
+      </a>
+      <nav class="hidden md:flex items-center gap-7">
+        <a class="nav-link" href="#product">Product</a>
+        <a class="nav-link" href="#how">How it works</a>
+        <a class="nav-link" href="#why">Why it matters</a>
+      </nav>
+      <div class="flex items-center gap-2">
+        <a href="./app.html" class="hidden sm:inline-flex items-center gap-2 btn-secondary px-3.5 py-2 rounded-full text-sm font-semibold">Open dashboard</a>
+        <a href="./app.html" class="inline-flex items-center gap-2 btn-primary px-3.5 py-2 rounded-full text-sm font-semibold">Try demo</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO (badge + headline + body + CTAs ABOVE screenshot) -->
+  <section class="relative hero-bg">
+    <div class="absolute inset-0 grid-bg opacity-60 pointer-events-none"></div>
+    <div class="relative max-w-7xl mx-auto px-6 pt-20 pb-12 text-center">
+
+      <div class="flex justify-center">
+        <span class="pill bg-white/80 border border-black/5 text-ink2"><span class="badge-dot"></span>AI for Environmental Sustainability</span>
+      </div>
+
+      <h1 class="mt-6 text-[44px] md:text-[68px] leading-[1.02] tracking-[-0.04em] font-black text-ink">
+        Run AI workloads
+        <span class="font-serif italic font-normal text-teal-700">when the grid is cleanest.</span>
+      </h1>
+
+      <p class="mt-5 max-w-2xl mx-auto text-[17px] md:text-[18px] text-slate-600 leading-relaxed">
+        GridWise AI uses live grid carbon data and optimization to schedule flexible workloads into their lowest-emission window — without changing what gets computed or missing a deadline.
+      </p>
+
+      <div class="mt-8 flex items-center justify-center gap-3">
+        <a href="./app.html" class="btn-primary px-5 py-3 rounded-full text-sm font-semibold inline-flex items-center gap-2">
+          Open dashboard
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+        <a href="#product" class="btn-secondary px-5 py-3 rounded-full text-sm font-semibold inline-flex items-center gap-2">See how it works</a>
+      </div>
+
+      <!-- Product screenshot mock -->
+      <div class="relative mt-14">
+        <div class="absolute inset-x-10 -top-6 h-24 rounded-[28px] bg-gradient-to-r from-teal-300/40 via-blue-300/30 to-orange-200/40 blur-2xl"></div>
+        <div class="relative card glow overflow-hidden text-left">
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-black/5 bg-white">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-400/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></span>
+            <div class="ml-3 text-[12px] text-slate-500">app.gridwise.ai/dashboard</div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-0">
+            <div class="p-5 border-r border-black/5">
+              <div class="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">New job</div>
+              <div class="space-y-3">
+                <div>
+                  <div class="text-[12px] text-slate-500 mb-1">Region</div>
+                  <div class="kpi-card !py-2.5 text-sm font-medium">US-CAL-CISO</div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="text-[12px] text-slate-500 mb-1">Duration</div>
+                    <div class="kpi-card !py-2.5 text-sm font-medium">4 h</div>
+                  </div>
+                  <div>
+                    <div class="text-[12px] text-slate-500 mb-1">Power</div>
+                    <div class="kpi-card !py-2.5 text-sm font-medium">12 kW</div>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-[12px] text-slate-500 mb-1">Deadline</div>
+                  <div class="kpi-card !py-2.5 text-sm font-medium">Tomorrow 08:00 UTC</div>
+                </div>
+                <button class="w-full btn-primary rounded-xl py-2.5 text-sm font-semibold mt-2">Optimize schedule</button>
+              </div>
+            </div>
+            <div class="md:col-span-2 p-5">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Carbon intensity (gCO2e/kWh)</div>
+                <div class="flex items-center gap-3 text-[12px] text-slate-500">
+                  <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-orange-400/80"></span>Baseline</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-teal-500/80"></span>Optimized</span>
+                </div>
+              </div>
+              <div class="mt-3 h-[180px]"><canvas id="heroChart"></canvas></div>
+              <div class="mt-5 grid grid-cols-3 gap-3">
+                <div class="kpi-card">
+                  <div class="text-[12px] text-slate-500">CO2 avoided</div>
+                  <div class="mt-1 text-2xl font-bold tracking-tight">3.9 <span class="text-base text-slate-500 font-semibold">kg</span></div>
+                </div>
+                <div class="kpi-card">
+                  <div class="text-[12px] text-slate-500">Reduction</div>
+                  <div class="mt-1 text-2xl font-bold tracking-tight text-teal-700">26.4%</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="text-[12px] text-slate-500">Deadline</div>
+                  <div class="mt-1 text-2xl font-bold tracking-tight">Met</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOOLS STRIP -->
+  <section class="border-y border-black/5 bg-white">
+    <div class="max-w-7xl mx-auto px-6 py-6 text-center">
+      <div class="text-[12px] font-semibold uppercase tracking-[0.18em] text-slate-500">Powered by</div>
+      <div class="mt-4 marquee overflow-hidden">
+        <div class="scroll inline-flex gap-10 whitespace-nowrap text-slate-500 text-sm">
+          <span>Electricity Maps</span><span>&bull;</span>
+          <span>WattTime</span><span>&bull;</span>
+          <span>Gemma &middot; Gemini API</span><span>&bull;</span>
+          <span>FastAPI</span><span>&bull;</span>
+          <span>Backboard</span><span>&bull;</span>
+          <span>ElevenLabs</span><span>&bull;</span>
+          <span>Electricity Maps</span><span>&bull;</span>
+          <span>WattTime</span><span>&bull;</span>
+          <span>Gemma &middot; Gemini API</span><span>&bull;</span>
+          <span>FastAPI</span><span>&bull;</span>
+          <span>Backboard</span><span>&bull;</span>
+          <span>ElevenLabs</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM + SOLUTION + FEATURES -->
+  <section id="product" class="max-w-7xl mx-auto px-6 py-24">
+    <div class="grid md:grid-cols-2 gap-10 items-start">
+      <div>
+        <div class="pill bg-rose-50 text-rose-700">The problem</div>
+        <h2 class="mt-4 text-3xl md:text-4xl font-black tracking-[-0.03em]">Grid emissions vary every hour. Scheduling ignores that.</h2>
+        <p class="mt-4 text-slate-600 text-[16px] leading-relaxed">Grid electricity is not equally clean every hour. Sometimes a lot of power comes from wind, solar, or nuclear; other times gas or coal plants carry more of the load. The same electricity use can mean more or less CO2 depending on <em>when</em> you use it.</p>
+        <p class="mt-3 text-slate-600 text-[16px] leading-relaxed">Many compute jobs don't need to start this second &mdash; they only need to finish by a deadline. Yet teams still run them immediately, often landing in high-carbon hours. Same work, worse timing, avoidable emissions.</p>
+      </div>
+      <div>
+        <div class="pill bg-teal-50 text-teal-700">The solution</div>
+        <h2 class="mt-4 text-3xl md:text-4xl font-black tracking-[-0.03em]">Use live carbon data. Pick the cleanest window.</h2>
+        <p class="mt-4 text-slate-600 text-[16px] leading-relaxed">GridWise pulls real hourly carbon intensity from Electricity Maps, computes the lowest-emission contiguous window that still meets your deadline, and shows exactly how many kg CO2 you save versus "run now".</p>
+        <p class="mt-3 text-slate-600 text-[16px] leading-relaxed">A Gemma-powered AI agent then explains the decision in plain language and remembers past runs so you can see improvement over time.</p>
+        <a href="./app.html" class="mt-5 inline-flex items-center gap-2 btn-primary px-5 py-3 rounded-full text-sm font-semibold">Try the scheduler &rarr;</a>
+      </div>
+    </div>
+
+    <div class="mt-14 grid md:grid-cols-3 gap-6">
+      <div class="card p-6">
+        <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-bold">01</div>
+        <h3 class="mt-4 text-lg font-semibold tracking-tight">Carbon-aware optimization</h3>
+        <p class="mt-2 text-slate-600 text-[15px] leading-relaxed">Among all valid start times before your deadline, GridWise picks the window with the lowest total emissions using real grid signal, not estimates.</p>
+      </div>
+      <div class="card p-6">
+        <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">02</div>
+        <h3 class="mt-4 text-lg font-semibold tracking-tight">Explainable AI agent</h3>
+        <p class="mt-2 text-slate-600 text-[15px] leading-relaxed">A Gemma-powered agent narrates the schedule in plain English &mdash; why that window, which hours were dirtiest, and how much CO2 was avoided versus baseline.</p>
+      </div>
+      <div class="card p-6">
+        <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold">03</div>
+        <h3 class="mt-4 text-lg font-semibold tracking-tight">Memory &amp; comparison</h3>
+        <p class="mt-2 text-slate-600 text-[15px] leading-relaxed">Persists past optimizations via Backboard and surfaces "vs. last run" deltas so operators can see how impact accumulates over time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" class="bg-mist border-y border-black/5">
+    <div class="max-w-7xl mx-auto px-6 py-24">
+      <div class="grid md:grid-cols-2 gap-12 items-start">
+        <div>
+          <div class="pill bg-white border border-black/5 text-ink2">How it works</div>
+          <h2 class="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em]">From job to clean schedule in <span class="font-serif italic font-normal">three steps.</span></h2>
+          <p class="mt-4 text-slate-600 text-lg leading-relaxed">No new hardware. Just a smarter scheduler that aligns flexible demand with cleaner generation &mdash; including firm low-carbon power like nuclear baseload.</p>
+          <a href="./app.html" class="mt-6 inline-flex items-center gap-2 btn-primary px-5 py-3 rounded-full text-sm font-semibold">Open dashboard &rarr;</a>
+        </div>
+        <ol class="space-y-5">
+          <li class="card p-6 flex gap-4">
+            <span class="check">1</span>
+            <div>
+              <div class="font-semibold tracking-tight">Ingest grid signal</div>
+              <div class="text-slate-600 text-[15px] mt-1">Pull real or forecasted hourly carbon intensity by region from Electricity Maps or WattTime.</div>
+            </div>
+          </li>
+          <li class="card p-6 flex gap-4">
+            <span class="check">2</span>
+            <div>
+              <div class="font-semibold tracking-tight">Compute baseline &amp; optimized</div>
+              <div class="text-slate-600 text-[15px] mt-1">Baseline = run immediately. Optimized = lowest-emission contiguous window before your deadline. Show kg CO2 saved.</div>
+            </div>
+          </li>
+          <li class="card p-6 flex gap-4">
+            <span class="check">3</span>
+            <div>
+              <div class="font-semibold tracking-tight">Agent explains &amp; remembers</div>
+              <div class="text-slate-600 text-[15px] mt-1">Plain-language reasoning, optional voice explanation via ElevenLabs, and run-to-run memory via Backboard.</div>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY IT MATTERS -->
+  <section id="why" class="max-w-7xl mx-auto px-6 py-24">
+    <div class="grid md:grid-cols-3 gap-6 items-stretch">
+      <div class="card p-8 md:col-span-2 relative overflow-hidden">
+        <div class="absolute -right-20 -top-20 w-72 h-72 rounded-full bg-teal-200/40 blur-3xl"></div>
+        <div class="pill bg-teal-50 text-teal-700">Why it matters</div>
+        <h3 class="mt-3 text-2xl md:text-3xl font-black tracking-[-0.02em]">AI compute is growing fast. The grid can't keep up.</h3>
+        <p class="mt-3 text-slate-600 text-[16px] leading-relaxed max-w-2xl">In 2025, global electricity demand grew 3%, with data centers among the fastest-growing contributors &mdash; accounting for around half of total U.S. electricity demand growth. At the same time, grid emissions are not constant: hourly carbon intensity can change significantly depending on generation mix, imports, and system conditions. That creates a clear opportunity: <strong>same compute, smarter timing.</strong> Instead of changing the job itself, GridWise changes <em>when</em> it runs so flexible workloads align with lower-carbon hours while still meeting deadlines. This approach also helps align demand with firm low-carbon supply like nuclear baseload, reducing reliance on fossil peaker plants.</p>
+        <div class="mt-6 grid grid-cols-3 gap-4">
+          <div>
+            <div class="text-3xl md:text-4xl font-black tracking-tight">10&ndash;25%</div>
+            <div class="text-slate-500 text-sm mt-1">typical CO2 reduction per job</div>
+          </div>
+          <div>
+            <div class="text-3xl md:text-4xl font-black tracking-tight">100%</div>
+            <div class="text-slate-500 text-sm mt-1">deadlines preserved</div>
+          </div>
+          <div>
+            <div class="text-3xl md:text-4xl font-black tracking-tight">0</div>
+            <div class="text-slate-500 text-sm mt-1">extra hardware needed</div>
+          </div>
+        </div>
+      </div>
+      <div class="card p-8">
+        <div class="pill bg-white border border-black/5 text-ink2">Demo scenario</div>
+        <h4 class="mt-3 text-xl font-bold tracking-tight">Nightly AI training run</h4>
+        <ul class="mt-4 space-y-3 text-[15px] text-slate-700">
+          <li class="flex items-start gap-3"><span class="check">&#10003;</span><span>4-hour batch job, 12 kW</span></li>
+          <li class="flex items-start gap-3"><span class="check">&#10003;</span><span>Region: US-CAL-CISO</span></li>
+          <li class="flex items-start gap-3"><span class="check">&#10003;</span><span>Deadline: 08:00 UTC</span></li>
+          <li class="flex items-start gap-3"><span class="check">&#10003;</span><span>~3.9 kg CO2 avoided</span></li>
+          <li class="flex items-start gap-3"><span class="check">&#10003;</span><span>AI explains the decision</span></li>
+        </ul>
+        <a href="./app.html" class="mt-6 inline-flex w-full justify-center btn-primary px-4 py-2.5 rounded-xl text-sm font-semibold">Run this scenario &rarr;</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-black/5">
+    <div class="max-w-7xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-slate-500">
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center justify-center w-6 h-6 rounded-md bg-ink text-white text-[11px] font-black">G</span>
+        <span class="font-semibold text-ink">GridWise AI</span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a class="hover:text-ink" href="#product">Product</a>
+        <a class="hover:text-ink" href="#how">How it works</a>
+        <a class="hover:text-ink" href="#why">Why it matters</a>
+        <a class="hover:text-ink" href="./app.html">Dashboard</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script>
+    (function(){
+      const ctx = document.getElementById('heroChart');
+      if (!ctx) return;
+      const labels = ['18','19','20','21','22','23','00','01','02','03','04','05'];
+      const carbon = [410,430,420,400,360,320,300,260,250,270,280,310];
+      const baselineMask = labels.map((_, i) => i <= 3 ? carbon[i] : null);
+      const optimizedMask = labels.map((_, i) => (i >= 7 && i <= 10) ? carbon[i] : null);
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Carbon', data: carbon, borderColor: '#0f172a', backgroundColor: 'rgba(15,23,42,0.04)', tension: 0.35, pointRadius: 0, borderWidth: 2, fill: true },
+            { label: 'Baseline', data: baselineMask, borderColor: 'transparent', backgroundColor: 'rgba(249,115,22,0.18)', tension: 0.35, pointRadius: 0, borderWidth: 0, fill: true },
+            { label: 'Optimized', data: optimizedMask, borderColor: 'transparent', backgroundColor: 'rgba(20,184,166,0.22)', tension: 0.35, pointRadius: 0, borderWidth: 0, fill: true },
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(2,6,23,0.05)' }, ticks: { color: '#94a3b8', font: { size: 10 } } }
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
